@@ -8,6 +8,11 @@
 # MySQL:  "mysql+pymysql://user:pass@127.0.0.1:3306/marketflow?charset=utf8mb4"      (env: DATABASE_URL)
 url = "sqlite:///data/marketflow.db"
 
+[auth]
+# Signs login tokens. REQUIRED for the API; >= 32 chars. Generate:  python -c "import secrets; print(secrets.token_urlsafe(48))"
+jwt_secret = ""        # env: JWT_SECRET
+token_ttl_minutes = 60 # env: TOKEN_TTL_MINUTES
+
 [llm]
 mock = true            # env: MOCK_LLM. Set false to use Gemini for self-healing extraction.
 gemini_api_key = ""    # env: GEMINI_API_KEY  (https://aistudio.google.com)

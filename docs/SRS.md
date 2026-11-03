@@ -175,7 +175,7 @@ Internal cost accounting, warehouse balance, and velocity snapshot.
 | `lifecycle_metric` | Expiry / Age Matrix | `JSON` | `NOT NULL` | `remaining_days` ($D\text{-Day}$), `holding_age_days` |
 
 ### 3.5 Personalization & Watchlists (`users`, `user_category_assignments`, `user_watchlists`, `user_preferences`)
-* `users`: `user_id` (PK), `email`, `name`, `role` (`ADMIN`, `MD`, `BUYER`).
+* `users`: `user_id` (PK), `email`, `name`, `role` (`ADMIN`, `MD`, `BUYER`), `password_hash` (scrypt), `active`.
 * `user_category_assignments`: `user_id` (FK), `category_l`, `category_m` (NULL = all) — defines the scope used by F-05-1.
 * `user_watchlists`: `watch_id` (PK), `user_id` (FK), `std_item_id` (FK), `sort_order`.
 * `user_preferences`: `pref_id` (PK), `user_id` (FK), `alert_margin_bep` (`DECIMAL(5,2)`), `ui_layout` (`JSON`).

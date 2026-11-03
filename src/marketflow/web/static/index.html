@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MarketFlow</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header><h1>MarketFlow</h1><div id="who"></div></header>
+  <main>
+    <section id="login">
+      <form id="login-form">
+        <label>Email <input name="email" type="email" autocomplete="username" required></label>
+        <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+        <button type="submit">Sign in</button>
+        <p id="login-error" role="alert"></p>
+      </form>
+    </section>
+    <section id="app" hidden>
+      <nav><button data-tab="matrix" class="active">Comparison matrix</button><button data-tab="recs">Recommendations</button></nav>
+      <div id="matrix">
+        <label class="inline"><input type="checkbox" id="only-watch"> Watchlist only</label>
+        <table id="matrix-table"><thead><tr>
+          <th>Item</th><th>Channel</th><th>Wholesale<br><small>per std unit</small></th><th>Our price</th>
+          <th class="cost">Margin</th><th>Lowest competitor<br><small>pack price</small></th><th>Stock</th><th>Watch</th>
+        </tr></thead><tbody></tbody></table>
+      </div>
+      <div id="recs" hidden>
+        <table id="recs-table"><thead><tr><th>#</th><th>Item</th><th>Channel</th><th>Current</th><th>Suggested</th><th>Reason</th><th>Flags</th><th>Status</th><th></th></tr></thead><tbody></tbody></table>
+      </div>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

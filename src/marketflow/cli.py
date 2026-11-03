@@ -5,6 +5,9 @@
   python -m marketflow.cli recs [--status PENDING]
   python -m marketflow.cli approve|reject|apply|revert ID --as NAME:ROLE      (ROLE: ADMIN | MD | BUYER)
   python -m marketflow.cli audit
+  python -m marketflow.cli add-user EMAIL NAME ADMIN|MD|BUYER     (prompts for password)
+  python -m marketflow.cli assign EMAIL Fresh/Fruit [Fresh/Vegetable ...]
+  python -m marketflow.web [--port 8000]                           (API + dashboard; needs auth.jwt_secret)
 """
 from __future__ import annotations
 
@@ -31,6 +34,8 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
     for name in ("approve", "reject", "apply", "revert"):
         p = sub.add_parser(name); p.add_argument("rec_id", type=int); p.add_argument("--as", dest="actor", required=True, metavar="NAME:ROLE")
     sub.add_parser("audit")
+    p = sub.add_parser("add-user"); p.add_argument("email"); p.add_argument("name"); p.add_argument("role", choices=["ADMIN", "MD", "BUYER"])
+    p = sub.add_parser("assign"); p.add_argument("email"); p.add_argument("category", metavar="CATEGORY_L[/CATEGORY_M]", nargs="+")
     a = ap.parse_args(argv)
 
     settings, tp = settings or load_settings(), tp or SystemTimeProvider()
@@ -39,6 +44,30 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
         init_sqlite(engine)
     repo = OpsRepository(engine)
 
+    if a.cmd == "add-user":
+        import getpass
+        from .web.repo import AppRepository
+        from .web.security import MIN_PASSWORD_LEN, hash_password
+        pw = getpass.getpass("Password: ")
+        if len(pw) < MIN_PASSWORD_LEN or pw != getpass.getpass("Repeat: "):
+            print(f"refused: password must match and be >= {MIN_PASSWORD_LEN} characters", file=out)
+            return 2
+        users = AppRepository(engine)
+        if users.user_by_email(a.email):
+            print("refused: email already registered", file=out)
+            return 2
+        print(f"created user #{users.create_user(a.email, a.name, a.role, hash_password(pw))}", file=out)
+        return 0
+    if a.cmd == "assign":
+        from .web.repo import AppRepository
+        users = AppRepository(engine)
+        u = users.user_by_email(a.email)
+        if u is None:
+            print("refused: no such user", file=out)
+            return 2
+        users.set_assignments(u["user_id"], [tuple((c.split("/", 1) + [""])[:2]) for c in a.category])
+        print(f"assigned {a.category} to {a.email}", file=out)
+        return 0
     if a.cmd == "import-erp":
         res = import_erp(a.file, repo, settings, tp, date.fromisoformat(a.date) if a.date else None)
         print(f"loaded={res.loaded} errors={len(res.errors)}", file=out)

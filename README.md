@@ -54,3 +54,19 @@ which writes them to `config/overrides.json`. Optional real-browser transport: `
 Header aliases (English/Korean) are in `config/extraction.json` under `erp.columns`; pricing parameters go in the
 `[decision]` table of `config/settings.toml` (see `settings.example.toml`). The engine is advisory: `apply` updates the
 internal ledger only; nothing is written back to a sales channel.
+
+## API & dashboard (Phase 4)
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"      # put the output in settings.toml -> [auth] jwt_secret
+.venv/bin/python -m marketflow.cli add-user kim@example.com "Kim" MD       # prompts for a password (>= 10 chars)
+.venv/bin/python -m marketflow.cli assign kim@example.com Fresh/Fruit      # MD/BUYER see only assigned categories
+.venv/bin/python -m marketflow.web                                          # http://127.0.0.1:8000  (refuses to start without a strong jwt_secret)
+```
+
+- `POST /auth/login` -> bearer token (rate-limited: 5 failures / 15 min per email). Roles are re-read on every request, so
+  deactivating a user or changing a role takes effect immediately.
+- `GET /matrix[?watchlist=true]` three-way comparison; `GET/PUT /watchlist`, `/preferences`; `GET /recommendations`;
+  `POST /recommendations/{id}/approve|reject|apply|revert`; `/admin/users`, `/admin/audit` (ADMIN only).
+- **BUYER responses omit cost and margin keys entirely** (enforced server-side, covered by tests); out-of-scope resources return 404.
+- The dashboard keeps its token in memory only (a reload signs you out). Serve it behind HTTPS if exposed beyond localhost.

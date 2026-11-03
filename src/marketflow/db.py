@@ -50,6 +50,20 @@ SQLITE_DDL = [
     """CREATE TABLE IF NOT EXISTS audit_log (
         audit_id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL,
         before_state TEXT, after_state TEXT)""",
+    """CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('ADMIN','MD','BUYER')), password_hash TEXT NOT NULL DEFAULT '',
+        active INTEGER NOT NULL DEFAULT 1)""",
+    """CREATE TABLE IF NOT EXISTS user_category_assignments (
+        user_id INTEGER NOT NULL REFERENCES users (user_id), category_l TEXT NOT NULL, category_m TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (user_id, category_l, category_m))""",
+    """CREATE TABLE IF NOT EXISTS user_watchlists (
+        watch_id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users (user_id),
+        std_item_id INTEGER NOT NULL REFERENCES master_products (std_item_id), sort_order INTEGER NOT NULL DEFAULT 0,
+        UNIQUE (user_id, std_item_id))""",
+    """CREATE TABLE IF NOT EXISTS user_preferences (
+        pref_id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL UNIQUE REFERENCES users (user_id),
+        alert_margin_bep NUMERIC NOT NULL DEFAULT 10, ui_layout TEXT)""",
     "CREATE INDEX IF NOT EXISTS idx_retail_item_time ON ext_retail_prices (std_item_id, scraped_at)",
     "CREATE INDEX IF NOT EXISTS idx_bench_item_date ON ext_public_benchmarks (std_item_id, recorded_date)",
 ]

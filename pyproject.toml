@@ -11,6 +11,9 @@ dependencies = [
   "tzdata",
   "beautifulsoup4>=4.12",
   "openpyxl>=3.1",
+  "fastapi>=0.110",
+  "uvicorn>=0.29",
+  "PyJWT>=2.8",
   "tomli>=2; python_version < '3.11'",
 ]
 
@@ -24,6 +27,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+marketflow = ["web/static/*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

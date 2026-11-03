@@ -31,6 +31,8 @@ class Settings:
     kamis_product_cls: str = "02"
     garak_url: str = ""
     garak_api_key: str = ""
+    jwt_secret: str = ""
+    token_ttl_minutes: int = 60
     decision: Mapping[str, Any] = field(default_factory=dict)   # raw [decision] table
 
     @property
@@ -46,7 +48,7 @@ class Settings:
             return "***" if v else "''"
         return (f"Settings(database_url={self.database_url!r}, mock_llm={self.mock_llm}, "
                 f"kamis_api_key={red(self.kamis_api_key)}, kamis_api_id={red(self.kamis_api_id)}, "
-                f"gemini_api_key={red(self.gemini_api_key)}, gemini_model={self.gemini_model!r}, garak_url={self.garak_url!r}, garak_api_key={red(self.garak_api_key)})")
+                f"jwt_secret={red(self.jwt_secret)}, gemini_api_key={red(self.gemini_api_key)}, gemini_model={self.gemini_model!r}, garak_url={self.garak_url!r}, garak_api_key={red(self.garak_api_key)})")
 
 
 def _truthy(v: Any) -> bool:
@@ -86,5 +88,7 @@ def load_settings(path: Path | str | None = None, env: Mapping[str, str] | None 
         kamis_product_cls=str(pick("KAMIS_PRODUCT_CLS", "sources", "kamis", "product_cls", default="02")),
         garak_url=str(pick("GARAK_API_URL", "sources", "garak", "url", default="")),
         garak_api_key=str(pick("GARAK_API_KEY", "sources", "garak", "api_key", default="")),
+        jwt_secret=str(pick("JWT_SECRET", "auth", "jwt_secret", default="")),
+        token_ttl_minutes=int(pick("TOKEN_TTL_MINUTES", "auth", "token_ttl_minutes", default=60)),
         decision=dict(data.get("decision", {})),
     )
