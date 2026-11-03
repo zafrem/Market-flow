@@ -155,3 +155,18 @@ def test_user_threshold_drives_low_margin_flag(env):
     _user(e, "md@x", "MD", 100, [cat])                             # alert on any margin <= 100%
     made = {r.internal_sku: r for _, r in service.run_decisions(repo, s, tp)}
     assert made["APPLE-1"].flags.get("LOW_MARGIN") is True
+
+
+def test_export_prices_lists_only_applied_changes(env, tmp_path):
+    repo, tp, e, s, _ = env
+    service.run_decisions(repo, s, tp)
+    service.approve(repo, tp, 1, MD); service.apply(repo, tp, 1, MD)
+    service.approve(repo, tp, 2, MD)                                  # approved but not applied -> not exported
+    out = io.StringIO()
+    assert cli.main(["export-prices", "--since", "2026-11-03"], settings=s, tp=tp, out=out) == 0
+    lines = out.getvalue().strip().splitlines()
+    assert lines[0] == "internal_sku,channel_name,new_price,previous_price,rec_id,applied_at,applied_by"
+    assert len(lines) == 2 and lines[1].startswith("APPLE-1,SHOPA,9000,10000,1,") and lines[1].endswith(",kim")  # stdout stays pure CSV
+    f = tmp_path / "o.csv"
+    cli.main(["export-prices", "--since", "2026-11-04", "--file", str(f)], settings=s, tp=tp, out=io.StringIO())
+    assert f.read_text(encoding="utf-8-sig").strip().count("\n") == 0          # header only: nothing after the cutoff

@@ -4,6 +4,7 @@
   python -m marketflow.cli decide
   python -m marketflow.cli recs [--status PENDING]
   python -m marketflow.cli approve|reject|apply|revert ID --as NAME:ROLE      (ROLE: ADMIN | MD | BUYER)
+  python -m marketflow.cli export-prices [--since YYYY-MM-DD] [--file OUT.csv]   (applied price changes, for channel bulk upload)
   python -m marketflow.cli audit
   python -m marketflow.cli review | resolve ID --as NAME:ROLE        (items the machine could not decide: unmatched/unparseable/quarantined)
   python -m marketflow.cli selectors | approve-selector ID | reject-selector ID --as NAME:ROLE
@@ -16,7 +17,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import date
+from datetime import date, datetime, time
 
 from .db import init_sqlite, make_engine
 from .decision import service
@@ -24,7 +25,7 @@ from .erp import import_erp
 from . import curation
 from .ops_repo import Repo
 from .settings import Settings, load_settings
-from .time_provider import SystemTimeProvider, TimeProvider
+from .time_provider import SystemTimeProvider, TimeProvider, today_kst
 
 
 def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp: TimeProvider | None = None,
@@ -37,6 +38,7 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
     p = sub.add_parser("recs"); p.add_argument("--status")
     for name in ("approve", "reject", "apply", "revert"):
         p = sub.add_parser(name); p.add_argument("rec_id", type=int); p.add_argument("--as", dest="actor", required=True, metavar="NAME:ROLE")
+    p = sub.add_parser("export-prices"); p.add_argument("--since"); p.add_argument("--file")
     sub.add_parser("audit")
     sub.add_parser("review")
     sub.add_parser("selectors")
@@ -121,6 +123,19 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
         for r in repo.list_recommendations(a.status):
             print(f"#{r['rec_id']} {r['status']:<10} item={r['std_item_id']} {r['channel_name']} "
                   f"{r['current_price']} -> {r['suggested_price']} ({r['reason_code']})", file=out)
+        return 0
+    if a.cmd == "export-prices":
+        import csv
+        since = datetime.combine(date.fromisoformat(a.since) if a.since else today_kst(tp), time.min)
+        rows = service.price_changes(repo, since)
+        cols = ["internal_sku", "channel_name", "new_price", "previous_price", "rec_id", "applied_at", "applied_by"]
+        fh = open(a.file, "w", newline="", encoding="utf-8-sig") if a.file else out
+        try:
+            w = csv.DictWriter(fh, fieldnames=cols, lineterminator="\n"); w.writeheader(); w.writerows(rows)
+        finally:
+            if a.file:
+                fh.close()
+        print(f"exported {len(rows)} price change(s)", file=sys.stderr if not a.file else out)
         return 0
     if a.cmd == "audit":
         for e in repo.audit_entries():

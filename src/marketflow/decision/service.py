@@ -98,3 +98,21 @@ def revert(repo: OpsRepository, tp: TimeProvider, rec_id: int, actor: Actor) -> 
     now = _naive_utc(tp)
     repo.set_status(rec_id, "REVERTED", actor.name, now)
     repo.audit(actor.name, "PRICE_REVERTED", {"sku": sku, "price": r["suggested_price"]}, {"sku": sku, "price": r["current_price"]}, now)
+
+
+def price_changes(repo: OpsRepository, since: datetime) -> list[dict[str, Any]]:
+    """APPLIED recommendations decided at/after `since`, shaped for a channel bulk-price upload file.
+    The system never pushes to a channel itself (advisory only); an operator uploads this file."""
+    out = []
+    for r in repo.list_recommendations("APPLIED"):
+        if r["decided_at"] is None or _as_dt(r["decided_at"]) < since:
+            continue
+        flags = repo.get_recommendation(r["rec_id"])["flags"]
+        out.append({"internal_sku": flags["metrics"]["internal_sku"], "channel_name": r["channel_name"],
+                    "new_price": r["suggested_price"], "previous_price": r["current_price"], "rec_id": r["rec_id"],
+                    "applied_at": _as_dt(r["decided_at"]).isoformat(sep=" "), "applied_by": r["decided_by"]})
+    return out
+
+
+def _as_dt(v: Any) -> datetime:
+    return v if isinstance(v, datetime) else datetime.fromisoformat(str(v))
