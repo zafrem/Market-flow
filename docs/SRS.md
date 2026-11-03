@@ -90,7 +90,6 @@ The platform executes dynamic price optimization, allocates liquidation channels
   * `collector-worker`: Python 3.11+ asynchronous batch & scraping service with Playwright.
   * `backend-api`: FastAPI REST service exposing decision outputs and simulation endpoints.
   * `frontend`: Single-page responsive operations dashboard.
-  * `redis`: Selector cache, job locks, and alert de-duplication keys.
   * `mock-server` (test profile only): WireMock / static-fixture server for scraper transport tests.
 * **Time Zone Policy:** All `DATETIME` columns are stored in **UTC**. Cron schedules and business-day boundaries are defined in `Asia/Seoul` (KST) and converted at the application layer. `DATE` columns (`recorded_date`) represent the KST calendar date.
 * **Configuration & Security:** All secrets, platform credentials, and API keys are strictly injected through `.env` runtime files and decoupled from Git tracking.
@@ -203,7 +202,7 @@ Internal cost accounting, warehouse balance, and velocity snapshot.
   * Strips scripts, style tags, SVG assets, and base64 payloads to construct sanitized, token-efficient HTML/Markdown.
   * Dispatches payload to Gemini Flash with structured schema constraints:
     $$\text{Payload} \xrightarrow{\text{Gemini Flash}} \{\text{product\_title}, \text{sale\_price}, \text{original\_price}, \text{is\_out\_of\_stock}, \text{badge\_info}\}$$
-* **F-02-3 (Selector Re-Synthesis):** Uses LLM token match locations to derive new robust selector candidates and emits an alert to Slack. Candidates are cached in Redis for the current run only (to prevent repeated LLM calls); they are **promoted to the persistent selector set only after human approval** (audited).
+* **F-02-3 (Selector Re-Synthesis):** Uses LLM token match locations to derive new robust selector candidates and emits an alert to Slack. Candidates are persisted in `selector_candidates`; they are **promoted to the persistent selector set only after human approval** (audited).
 * **F-02-4 (Extraction Validation):** Every LLM-extracted record MUST pass sanity checks before persistence: `sale_price > 0`, `sale_price <= original_price`, and deviation from the last accepted price for the same `channel_item_code` within a configurable bound (default ±50%). Failing records are quarantined (not written to `ext_retail_prices`) and alerted. Persisted LLM-sourced rows carry `extraction_source = 'LLM'` (§3.3) so they can be filtered.
 
 ### F-03: Data Normalization & Metric Computations
@@ -240,7 +239,7 @@ Internal cost accounting, warehouse balance, and velocity snapshot.
 * **F-05-1 (Role-Based Watchlist):** Category managers access filtered matrices displaying only assigned items (`category_l`, `category_m`).
 * **F-05-2 (Three-Way Comparison Matrix):** Side-by-side visual mapping across:
   $$\text{[Public Wholesale Index]} \longleftrightarrow \text{[Internal Landed Cost \& Active Price]} \longleftrightarrow \text{[Competitor Scraped Prices]}$$
-* **F-05-3 (Configurable Notification Rules):** Webhook/Slack alert dispatches when margin drops below threshold ($\le 10\%$ default; per category the highest `alert_margin_bep` among active ADMINs and the MDs assigned to it, BUYERs ignored) or stock-out events occur. Alerts are de-duplicated per (rule, item, channel) with a configurable suppression window (default 6h, via Redis), rate-limited, and retried with exponential backoff (max 5 attempts) before landing in a dead-letter log.
+* **F-05-3 (Configurable Notification Rules):** Webhook/Slack alert dispatches when margin drops below threshold ($\le 10\%$ default; per category the highest `alert_margin_bep` among active ADMINs and the MDs assigned to it, BUYERs ignored) or stock-out events occur. Alerts are de-duplicated per (rule, item, channel) with a configurable suppression window (default 6h, persisted in `alert_log`), rate-limited, and retried with exponential backoff (max 5 attempts) before landing in a dead-letter log.
 
 ---
 
@@ -337,7 +336,7 @@ To ensure the system can be validated automatically by an individual developer, 
 
 * **Phase 1: Foundation, DB Engine & Public Ingestion (Weeks 1–2)**
   * Cross-cutting test seams first: `TimeProvider`, pluggable network transport, `MOCK_LLM` stub (§6.2).
-  * Docker Compose scaffolding (MySQL 8.0 with Volume Mounts and Range Partitions; Redis).
+  * Docker Compose scaffolding (MySQL 8.0 with Volume Mounts and Range Partitions).
   * Data Definition Language (DDL) execution and Seed Master Catalog (`master_products`).
   * KAMIS and Garak Market API collectors with test suites.
 * **Phase 2: Scraper Harness, Human Simulation & AI Self-Healing (Weeks 3–4)**

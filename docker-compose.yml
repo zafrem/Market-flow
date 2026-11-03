@@ -1,4 +1,4 @@
-# Full topology: db + redis + collector-worker (scheduler) + backend-api (API + dashboard on :8000).
+# Full topology: db + collector-worker (scheduler) + backend-api (API + dashboard on :8000).
 services:
   db:
     image: mysql:8.0
@@ -19,20 +19,12 @@ services:
       timeout: 5s
       retries: 30
 
-  redis:
-    image: redis:7-alpine
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      retries: 10
-
   collector-worker:
     build:
       context: .
       dockerfile: docker/collector.Dockerfile
     environment:
       DATABASE_URL: mysql+pymysql://${MYSQL_USER:-marketflow}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE:-marketflow}?charset=utf8mb4
-      REDIS_URL: redis://redis:6379/0
       MOCK_LLM: ${MOCK_LLM:-true}
       KAMIS_API_KEY: ${KAMIS_API_KEY:-}
       KAMIS_API_ID: ${KAMIS_API_ID:-}
@@ -45,8 +37,6 @@ services:
       - ./config:/app/config   # edit rules / approved overrides without rebuilding
     depends_on:
       db:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     restart: unless-stopped
 

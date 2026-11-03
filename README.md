@@ -96,8 +96,9 @@ docker compose exec backend-api python -m marketflow.cli add-user admin@example.
 # dashboard + API: http://127.0.0.1:8000   (localhost only; put a TLS reverse proxy in front for remote access)
 ```
 
-Services: `db` (MySQL 8, schema from `db/init`), `redis`, `collector-worker` (scheduler), `backend-api`. Status: the MySQL
-path (DDL with partitions, upserts) has **not** been exercised against a live MySQL yet - run the `-m mysql` tests first.
+Services: `db` (MySQL 8, schema from `db/init`), `collector-worker` (scheduler), `backend-api`. Status: the schema, upserts and partition management were verified against a real MySQL 8.0.46 (`-m mysql` tests via
+`MARKETFLOW_TEST_DB_URL`); the Docker images themselves have not been built in CI yet. Run a single `collector-worker`:
+dedupe and job state live in the database, not Redis.
 
 ## Dashboard tests
 
