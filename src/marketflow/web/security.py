@@ -53,3 +53,48 @@ def read_token(secret: str, token: str, now: datetime) -> int | None:
         return int(claims["sub"])
     except (jwt.PyJWTError, KeyError, ValueError):
         return None
+
+
+class LoginThrottle:
+    """Failed-login limiter, in memory (per process).
+
+    * (email, client) : 5 / 15 min  -> locks that client out of that account only, so a stranger cannot lock the real
+                                       user out by guessing from elsewhere
+    * client          : 20 / 15 min -> stops one machine spraying many accounts
+    * email           : 30 / 15 min -> stops distributed guessing against one account
+    Old entries are dropped as they expire and the table size is capped, so random emails cannot grow memory.
+    Behind a reverse proxy, `client` is the proxy's address unless uvicorn is started with --proxy-headers."""
+    WINDOW = timedelta(minutes=15)
+    LIMITS = {"pair": 5, "client": 20, "email": 30}
+    MAX_KEYS = 10_000
+
+    def __init__(self) -> None:
+        self._hits: dict[tuple, list[datetime]] = {}
+
+    def _recent(self, key: tuple, now: datetime) -> list[datetime]:
+        live = [t for t in self._hits.get(key, ()) if now - t < self.WINDOW]
+        if live:
+            self._hits[key] = live
+        else:
+            self._hits.pop(key, None)
+        return live
+
+    @staticmethod
+    def _keys(email: str, client: str) -> dict[str, tuple]:
+        return {"pair": ("pair", email, client), "client": ("client", client), "email": ("email", email)}
+
+    def blocked(self, email: str, client: str, now: datetime) -> bool:
+        return any(len(self._recent(k, now)) >= self.LIMITS[n] for n, k in self._keys(email, client).items())
+
+    def fail(self, email: str, client: str, now: datetime) -> None:
+        room = self.MAX_KEYS - 3                                    # a failure adds up to 3 keys
+        if len(self._hits) > room:                                  # sweep expired entries; if still full, drop the oldest
+            for k in list(self._hits):
+                self._recent(k, now)
+            while len(self._hits) > room:
+                self._hits.pop(next(iter(self._hits)))
+        for k in self._keys(email, client).values():
+            self._hits.setdefault(k, []).append(now)
+
+    def succeed(self, email: str, client: str) -> None:
+        self._hits.pop(("pair", email, client), None)

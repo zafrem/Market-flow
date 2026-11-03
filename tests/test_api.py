@@ -294,3 +294,30 @@ def test_cannot_remove_the_last_active_admin(world):
     assert world.repo.update_user(h3, None, False) is False                                                                   # would leave none
     assert world.repo.update_user(h3, "BUYER", None) is False
     assert world.repo.update_user(h3, "ADMIN", True) is True
+
+
+def test_a_stranger_cannot_lock_out_the_real_user(world):
+    attacker = TestClient(world.client.app, client=("203.0.113.9", 4000))
+    for _ in range(5):
+        assert attacker.post("/auth/login", json={"email": "admin@x.com", "password": "bad"}).status_code == 401
+    assert attacker.post("/auth/login", json={"email": "admin@x.com", "password": PW}).status_code == 429      # attacker is stopped
+    assert world.client.post("/auth/login", json={"email": "admin@x.com", "password": PW}).status_code == 200  # real user is not
+
+
+def test_login_throttle_limits_and_memory():
+    from datetime import datetime
+    from marketflow.web.security import LoginThrottle
+    t0, t = datetime(2026, 1, 1), LoginThrottle()
+    for i in range(20):                                                    # one client spraying 20 different accounts
+        assert not t.blocked(f"u{i}@x", "1.1.1.1", t0)
+        t.fail(f"u{i}@x", "1.1.1.1", t0)
+    assert t.blocked("fresh@x", "1.1.1.1", t0) and not t.blocked("fresh@x", "2.2.2.2", t0)
+    t = LoginThrottle()
+    for i in range(30):                                                    # many clients, one account
+        t.fail("v@x", f"10.0.0.{i}", t0)
+    assert t.blocked("v@x", "99.9.9.9", t0)
+    assert not t.blocked("v@x", "99.9.9.9", t0 + LoginThrottle.WINDOW)    # all expire after the window
+    t = LoginThrottle(); t.MAX_KEYS = 50
+    for i in range(500):
+        t.fail(f"r{i}@x", f"c{i}", t0)
+    assert len(t._hits) <= 50                                              # bounded under a random-email flood

@@ -1,7 +1,6 @@
 """FastAPI service: auth, role-based masking, three-way matrix, watchlists, recommendation workflow."""
 from __future__ import annotations
 
-from collections import defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -20,12 +19,11 @@ from ..decision.service import Actor, WorkflowError
 from ..settings import Settings
 from ..time_provider import SystemTimeProvider, TimeProvider
 from .repo import AppRepository, Scope, in_scope
-from .security import MIN_PASSWORD_LEN, MIN_SECRET_LEN, burn_verify, hash_password, make_token, read_token, verify_password
+from .security import LoginThrottle, MIN_PASSWORD_LEN, MIN_SECRET_LEN, burn_verify, hash_password, make_token, read_token, verify_password
 
 STATIC = Path(__file__).parent / "static"
 COST_KEYS = {"purchase_cost", "fixed_cost", "logistics_cost", "channel_fee_rate", "promo_cost", "min_price_floor",
              "margin_amount", "margin_rate"}
-MAX_FAILURES, FAIL_WINDOW = 5, timedelta(minutes=15)
 Role = Literal["ADMIN", "MD", "BUYER"]
 
 
@@ -90,7 +88,7 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
     if engine.dialect.name == "sqlite":
         init_sqlite(engine)
     repo = AppRepository(engine)
-    failures: dict[str, list[datetime]] = defaultdict(list)
+    throttle = LoginThrottle()
     app = FastAPI(title="MarketFlow", docs_url=None, redoc_url=None, openapi_url=None)
 
     def now() -> datetime:
@@ -121,12 +119,11 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
 
     # ---- auth ---------------------------------------------------------------------------------
     @app.post("/auth/login")
-    def login(body: LoginIn):
-        email = body.email.strip().lower()
-        recent = [t for t in failures[email] if now() - t < FAIL_WINDOW]
-        failures[email] = recent
-        if len(recent) >= MAX_FAILURES:
-            raise HTTPException(429, "too many failed attempts; try again later", headers={"Retry-After": str(int(FAIL_WINDOW.total_seconds()))})
+    def login(body: LoginIn, request: Request):
+        email, client = body.email.strip().lower(), request.client.host if request.client else "?"
+        if throttle.blocked(email, client, now()):
+            raise HTTPException(429, "too many failed attempts; try again later",
+                                headers={"Retry-After": str(int(LoginThrottle.WINDOW.total_seconds()))})
         user = repo.user_by_email(email)
         if user is None or not user["active"]:
             burn_verify(body.password)
@@ -134,9 +131,9 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
         else:
             ok = verify_password(body.password, user["password_hash"])
         if not ok:
-            failures[email].append(now())
+            throttle.fail(email, client, now())
             raise HTTPException(401, "invalid email or password")
-        failures.pop(email, None)
+        throttle.succeed(email, client)
         return {"access_token": make_token(settings.jwt_secret, user["user_id"], tp.now(), settings.token_ttl_minutes),
                 "token_type": "bearer", "expires_in": settings.token_ttl_minutes * 60,
                 "user": {"email": user["email"], "name": user["name"], "role": user["role"]}}
