@@ -1,0 +1,4 @@
+{"items":[
+ {"item":"사과","kind":"후지","grade":"특","unit":"15kg","avg_price":"60,000","min_price":"45,000","max_price":"80,000","volume_kg":"12,000"},
+ {"item":"대파","kind":"","grade":"상","unit":"1kg","avg_price":"2,100","min_price":"","max_price":""}
+]}

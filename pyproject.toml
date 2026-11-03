@@ -1,0 +1,32 @@
+[project]
+name = "marketflow"
+version = "0.1.0"
+description = "MarketFlow - multi-channel market analysis & dynamic price optimization"
+requires-python = ">=3.10"
+dependencies = [
+  "httpx>=0.27",
+  "SQLAlchemy>=2.0",
+  "PyMySQL>=1.1",
+  "cryptography>=42",
+  "tzdata",
+  "tomli>=2; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+  "mysql: needs a live MySQL (set MARKETFLOW_TEST_DB_URL)",
+  "live: calls the real APIs with your tokens (set MARKETFLOW_LIVE=1)",
+]

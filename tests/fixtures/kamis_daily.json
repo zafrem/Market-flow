@@ -1,0 +1,7 @@
+{"condition":[["ok"]],"data":{"error_code":"000","item":[
+ {"item_name":"사과","kind_name":"후지","rank":"상품","unit":"10kg","dpr1":"52,300"},
+ {"item_name":"양파","kind_name":"양파","rank":"상품","unit":"1kg","dpr1":"1,450"},
+ {"item_name":"배추","kind_name":"봄","rank":"상품","unit":"10개","dpr1":"-"},
+ {"item_name":"두리안","kind_name":"","rank":"상품","unit":"1kg","dpr1":"9,000"},
+ {"item_name":"무","kind_name":"","rank":"상품","unit":"박스","dpr1":"8,000"}
+]}}

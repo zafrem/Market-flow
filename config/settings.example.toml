@@ -1,0 +1,21 @@
+# Copy to config/settings.toml (git-ignored) and fill in your tokens.
+#   cp config/settings.example.toml config/settings.toml && chmod 600 config/settings.toml
+# Any value can be overridden by an environment variable (shown in comments) - handy for Docker/CI.
+# Override the file location with MARKETFLOW_SETTINGS=/path/to/settings.toml
+
+[database]
+# SQLite for local use (relative paths are resolved from the project root; the file is created on first run).
+# MySQL:  "mysql+pymysql://user:pass@127.0.0.1:3306/marketflow?charset=utf8mb4"      (env: DATABASE_URL)
+url = "sqlite:///data/marketflow.db"
+
+[llm]
+mock = true            # env: MOCK_LLM. Real Gemini arrives in Phase 2.
+
+[sources.kamis]        # https://www.kamis.or.kr -> open API key + id
+api_key = ""           # env: KAMIS_API_KEY
+api_id  = ""           # env: KAMIS_API_ID
+product_cls = "02"     # "01" retail, "02" wholesale
+
+[sources.garak]        # Garak market endpoint (see src/marketflow/collectors/garak.py)
+url     = ""           # env: GARAK_API_URL
+api_key = ""           # env: GARAK_API_KEY

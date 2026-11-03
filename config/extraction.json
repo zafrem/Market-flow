@@ -1,0 +1,32 @@
+{
+  "common": {
+    "price_clean_pattern": "[,\\s]"
+  },
+  "units": {
+    "pattern": "^\\s*([\\d,]*\\.?\\d+)?\\s*({tokens})\\s*$",
+    "measure_tokens": {
+      "kg": ["g", 1000], "㎏": ["g", 1000], "킬로": ["g", 1000],
+      "g": ["g", 1], "그램": ["g", 1],
+      "l": ["ml", 1000], "ml": ["ml", 1]
+    },
+    "count_tokens": ["개", "ea", "unit", "마리", "포기", "단", "속", "구"]
+  },
+  "sources": {
+    "KAMIS": {
+      "parser": "marketflow.collectors.kamis:parse_kamis",
+      "items_path": ["data", "item"],
+      "status_path": ["data"],
+      "no_data_codes": ["001"],
+      "alias_strip_pattern": "/.*$",
+      "fields": {"name": "item_name", "kind": "kind_name", "rank": "rank", "unit": "unit", "price": "dpr1"}
+    },
+    "GARAK": {
+      "parser": "marketflow.collectors.garak:parse_garak",
+      "items_path": ["items"],
+      "fields": {
+        "name": "item", "kind": "kind", "grade": "grade", "unit": "unit",
+        "avg": "avg_price", "min": "min_price", "max": "max_price", "volume": "volume_kg"
+      }
+    }
+  }
+}

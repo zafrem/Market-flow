@@ -1,0 +1,49 @@
+# Phase 1 topology: db + redis + collector-worker. backend-api / frontend arrive in Phases 3-4.
+services:
+  db:
+    image: mysql:8.0
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci", "--default-time-zone=+00:00"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-marketflow}
+      MYSQL_USER: ${MYSQL_USER:-marketflow}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - ./mysql_data:/var/lib/mysql
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "127.0.0.1:${MYSQL_PORT:-3306}:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  collector-worker:
+    build:
+      context: .
+      dockerfile: docker/collector.Dockerfile
+    environment:
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-marketflow}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE:-marketflow}?charset=utf8mb4
+      REDIS_URL: redis://redis:6379/0
+      MOCK_LLM: ${MOCK_LLM:-true}
+      KAMIS_API_KEY: ${KAMIS_API_KEY:-}
+      KAMIS_API_ID: ${KAMIS_API_ID:-}
+      GARAK_API_URL: ${GARAK_API_URL:-}
+      GARAK_API_KEY: ${GARAK_API_KEY:-}
+      TZ: Asia/Seoul
+    volumes:
+      - ./config:/app/config   # edit rules / approved overrides without rebuilding
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
