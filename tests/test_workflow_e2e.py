@@ -127,3 +127,31 @@ def test_cli_end_to_end(env):
     assert "PRICE_APPLIED" in txt
     code, txt = run("import-erp", str(f))
     assert code == 0 and "loaded=2 errors=0" in txt
+
+
+def _user(e, email, role, thr, cats=(), active=1):
+    with e.begin() as c:
+        uid = c.execute(text("INSERT INTO users (email,name,role,password_hash,active) VALUES (:e,:e,:r,'x',:a)"),
+                        {"e": email, "r": role, "a": active}).lastrowid
+        c.execute(text("INSERT INTO user_preferences (user_id, alert_margin_bep) VALUES (:u,:t)"), {"u": uid, "t": thr})
+        for cat in cats:
+            c.execute(text("INSERT INTO user_category_assignments (user_id,category_l,category_m) VALUES (:u,:c,'')"), {"u": uid, "c": cat})
+
+
+def test_alert_threshold_is_max_over_scoped_active_md_and_admin(env):
+    repo, _, e, _, _ = env
+    cat = repo.item_exists(1)["category_l"]
+    assert repo.alert_threshold(cat) is None                       # nobody configured -> system default
+    _user(e, "md1@x", "MD", 12, [cat]); _user(e, "md2@x", "MD", 20, ["Other"])
+    _user(e, "buyer@x", "BUYER", 90, [cat]); _user(e, "gone@x", "MD", 80, [cat], active=0)
+    assert repo.alert_threshold(cat) == Decimal("12")              # md2 other category, buyer/inactive ignored
+    _user(e, "admin@x", "ADMIN", 15)
+    assert repo.alert_threshold(cat) == Decimal("15")
+
+
+def test_user_threshold_drives_low_margin_flag(env):
+    repo, tp, e, s, _ = env
+    cat = repo.item_exists(1)["category_l"]
+    _user(e, "md@x", "MD", 100, [cat])                             # alert on any margin <= 100%
+    made = {r.internal_sku: r for _, r in service.run_decisions(repo, s, tp)}
+    assert made["APPLE-1"].flags.get("LOW_MARGIN") is True

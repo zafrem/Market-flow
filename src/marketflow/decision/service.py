@@ -2,7 +2,7 @@
 transition is audited and applying can be reverted. (No channel write-back yet: apply updates the internal ledger.)"""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -36,6 +36,9 @@ def run_decisions(repo: OpsRepository, settings: Settings, tp: TimeProvider, on:
     created = []
     for row in repo.inventory_on(day):
         cfg = load_decision_config(settings.decision, row["category_l"])
+        user_threshold = getattr(repo, "alert_threshold", lambda _c: None)(row["category_l"])
+        if user_threshold is not None:                                 # F-05-3: per-user alert_margin_bep
+            cfg = replace(cfg, alert_margin_pct=user_threshold)
         ctx = Context(
             competitors=repo.competitor_snapshots(row["std_item_id"], now - timedelta(hours=float(cfg.competitor_max_age_hours)), region),
             recent_daily_sales=repo.sales_history(row["internal_sku"], row["channel_name"], day),

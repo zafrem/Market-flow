@@ -240,7 +240,7 @@ Internal cost accounting, warehouse balance, and velocity snapshot.
 * **F-05-1 (Role-Based Watchlist):** Category managers access filtered matrices displaying only assigned items (`category_l`, `category_m`).
 * **F-05-2 (Three-Way Comparison Matrix):** Side-by-side visual mapping across:
   $$\text{[Public Wholesale Index]} \longleftrightarrow \text{[Internal Landed Cost \& Active Price]} \longleftrightarrow \text{[Competitor Scraped Prices]}$$
-* **F-05-3 (Configurable Notification Rules):** Webhook/Slack alert dispatches when margin drops below threshold ($\le 10\%$, per-user via `alert_margin_bep`) or stock-out events occur. Alerts are de-duplicated per (rule, item, channel) with a configurable suppression window (default 6h, via Redis), rate-limited, and retried with exponential backoff (max 5 attempts) before landing in a dead-letter log.
+* **F-05-3 (Configurable Notification Rules):** Webhook/Slack alert dispatches when margin drops below threshold ($\le 10\%$ default; per category the highest `alert_margin_bep` among active ADMINs and the MDs assigned to it, BUYERs ignored) or stock-out events occur. Alerts are de-duplicated per (rule, item, channel) with a configurable suppression window (default 6h, via Redis), rate-limited, and retried with exponential backoff (max 5 attempts) before landing in a dead-letter log.
 
 ---
 

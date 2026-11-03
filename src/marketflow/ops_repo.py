@@ -53,6 +53,16 @@ class OpsRepository:
         r = self._rows("SELECT std_item_id, category_l, standard_unit FROM master_products WHERE std_item_id = :i", i=std_item_id)
         return r[0] if r else None
 
+    def alert_threshold(self, category_l: str) -> Decimal | None:
+        """Highest `alert_margin_bep` among active ADMIN users and MDs assigned to the category (BUYERs never see
+        margins, so their setting is ignored). None -> caller keeps the system default."""
+        rows = self._rows(
+            "SELECT p.alert_margin_bep FROM user_preferences p JOIN users u USING (user_id) WHERE u.active = 1 AND "
+            "(u.role = 'ADMIN' OR (u.role = 'MD' AND EXISTS (SELECT 1 FROM user_category_assignments a "
+            "WHERE a.user_id = u.user_id AND a.category_l = :c)))", c=category_l)
+        vals = [_dec(r["alert_margin_bep"]) for r in rows]
+        return max(vals) if vals else None
+
     def replace_inventory(self, rows: list[dict[str, Any]]) -> int:
         """Idempotent load keyed by (recorded_date, internal_sku, channel_name): delete + insert, one transaction."""
         if not rows:
