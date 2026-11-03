@@ -34,6 +34,9 @@ class Settings:
     jwt_secret: str = ""
     alert_webhook_url: str = ""
     token_ttl_minutes: int = 60
+    tls_cert: str = ""          # PEM paths: serve HTTPS directly
+    tls_key: str = ""
+    hsts: bool = False          # send Strict-Transport-Security (also implied by tls_cert); set when a proxy terminates TLS
     decision: Mapping[str, Any] = field(default_factory=dict)   # raw [decision] table
 
     @property
@@ -92,5 +95,8 @@ def load_settings(path: Path | str | None = None, env: Mapping[str, str] | None 
         alert_webhook_url=str(pick("ALERT_WEBHOOK_URL", "alerts", "webhook_url", default="")),
         jwt_secret=str(pick("JWT_SECRET", "auth", "jwt_secret", default="")),
         token_ttl_minutes=int(pick("TOKEN_TTL_MINUTES", "auth", "token_ttl_minutes", default=60)),
+        tls_cert=str(pick("TLS_CERT", "server", "tls_cert", default="")),
+        tls_key=str(pick("TLS_KEY", "server", "tls_key", default="")),
+        hsts=_truthy(pick("HSTS", "server", "hsts", default=False)),
         decision=dict(data.get("decision", {})),
     )

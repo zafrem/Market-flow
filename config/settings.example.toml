@@ -13,6 +13,13 @@ url = "sqlite:///data/marketflow.db"
 jwt_secret = ""        # env: JWT_SECRET
 token_ttl_minutes = 60 # env: TOKEN_TTL_MINUTES
 
+[server]
+# HTTPS. Credentials and margin data cross this connection: use TLS anywhere beyond localhost.
+# Either serve TLS here (both paths required) or terminate it at a reverse proxy and set hsts = true.
+tls_cert = ""          # env: TLS_CERT  (PEM)
+tls_key  = ""          # env: TLS_KEY   (PEM)
+hsts = false           # env: HSTS
+
 [alerts]
 # Slack-compatible incoming webhook (https). Alerts carry margin data: point it at a channel only MD/ADMIN can read.
 webhook_url = ""       # env: ALERT_WEBHOOK_URL

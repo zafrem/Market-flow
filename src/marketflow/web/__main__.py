@@ -5,9 +5,11 @@ import uvicorn
 
 from ..settings import load_settings
 from .app import create_app
+from .serve import uvicorn_kwargs
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--host", default="127.0.0.1")
 ap.add_argument("--port", type=int, default=8000)
 a = ap.parse_args()
-uvicorn.run(create_app(load_settings()), host=a.host, port=a.port)
+settings = load_settings()
+uvicorn.run(create_app(settings), **uvicorn_kwargs(settings, a.host, a.port))

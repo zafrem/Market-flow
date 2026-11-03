@@ -102,6 +102,8 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
         resp.headers.update({"X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY",
                              "Content-Security-Policy": "default-src 'self'; frame-ancestors 'none'",
                              "Referrer-Policy": "no-referrer", "Cache-Control": "no-store"})
+        if settings.hsts or settings.tls_cert:
+            resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return resp
 
     def current_user(request: Request) -> CurrentUser:
