@@ -18,7 +18,8 @@
       </form>
     </section>
     <section id="app" hidden>
-      <nav><button data-tab="matrix" class="active">Comparison matrix</button><button data-tab="recs">Recommendations</button></nav>
+      <nav><button data-tab="matrix" class="active">Comparison matrix</button><button data-tab="recs">Recommendations</button><button data-tab="review" class="decider">Review queue</button><button data-tab="selectors" class="decider">Selector candidates</button></nav>
+      <p id="toast" role="status"></p>
       <div id="matrix">
         <label class="inline"><input type="checkbox" id="only-watch"> Watchlist only</label>
         <table id="matrix-table"><thead><tr>
@@ -28,6 +29,12 @@
       </div>
       <div id="recs" hidden>
         <table id="recs-table"><thead><tr><th>#</th><th>Item</th><th>Channel</th><th>Current</th><th>Suggested</th><th>Reason</th><th>Flags</th><th>Status</th><th></th></tr></thead><tbody></tbody></table>
+      </div>
+      <div id="review" hidden>
+        <table id="review-table"><thead><tr><th>#</th><th>Kind</th><th>Source</th><th>Item</th><th>Reason</th><th></th></tr></thead><tbody></tbody></table>
+      </div>
+      <div id="selectors" hidden>
+        <table id="selectors-table"><thead><tr><th>#</th><th>Platform</th><th>Status</th><th>Item</th><th>Title</th><th>Price</th><th></th></tr></thead><tbody></tbody></table>
       </div>
     </section>
   </main>

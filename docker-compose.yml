@@ -1,4 +1,4 @@
-# Phase 1 topology: db + redis + collector-worker. backend-api / frontend arrive in Phases 3-4.
+# Full topology: db + redis + collector-worker (scheduler) + backend-api (API + dashboard on :8000).
 services:
   db:
     image: mysql:8.0
@@ -38,6 +38,8 @@ services:
       KAMIS_API_ID: ${KAMIS_API_ID:-}
       GARAK_API_URL: ${GARAK_API_URL:-}
       GARAK_API_KEY: ${GARAK_API_KEY:-}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       TZ: Asia/Seoul
     volumes:
       - ./config:/app/config   # edit rules / approved overrides without rebuilding
@@ -46,4 +48,26 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    restart: unless-stopped
+
+  backend-api:
+    build:
+      context: .
+      dockerfile: docker/collector.Dockerfile      # same image as the worker, different command
+    command: ["python", "-m", "marketflow.web", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-marketflow}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE:-marketflow}?charset=utf8mb4
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (>= 32 chars) in .env}
+      TOKEN_TTL_MINUTES: ${TOKEN_TTL_MINUTES:-60}
+      TZ: Asia/Seoul
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"          # localhost only; put a TLS reverse proxy in front for remote access
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
     restart: unless-stopped

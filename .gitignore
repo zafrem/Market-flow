@@ -7,3 +7,4 @@ __pycache__/
 config/overrides.json
 config/settings.toml
 data/
+build/

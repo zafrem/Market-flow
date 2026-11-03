@@ -12,6 +12,8 @@ async function api(path, opts = {}) {
   return body;
 }
 
+function toast(msg) { $("#toast").textContent = msg || ""; }
+
 function signOut() { token = me = null; $("#app").hidden = true; $("#login").hidden = false; $("#who").textContent = ""; }
 
 $("#login-form").addEventListener("submit", async (ev) => {
@@ -23,15 +25,16 @@ $("#login-form").addEventListener("submit", async (ev) => {
     $("#login").hidden = true; $("#app").hidden = false;
     const out = el("button", "Sign out"); out.onclick = signOut;
     $("#who").replaceChildren(document.createTextNode(me.name + " · " + me.role + "  "), out);
-    document.querySelectorAll(".cost").forEach((c) => c.hidden = me.role === "BUYER");
+    document.querySelectorAll(".cost, .decider").forEach((c) => c.hidden = me.role === "BUYER");
+    toast("");
     watch = new Set((await api("/watchlist")).std_item_ids);
-    await Promise.all([loadMatrix(), loadRecs()]);
+    await Promise.all([loadMatrix(), loadRecs(), ...(me.role === "BUYER" ? [] : [loadReview(), loadSelectors()])]);
   } catch (e) { $("#login-error").textContent = e.message; }
 });
 
 document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => {
   document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("active", x === b));
-  $("#matrix").hidden = b.dataset.tab !== "matrix"; $("#recs").hidden = b.dataset.tab !== "recs";
+  for (const id of ["matrix", "recs", "review", "selectors"]) $("#" + id).hidden = b.dataset.tab !== id;
 }));
 $("#only-watch").addEventListener("change", loadMatrix);
 
@@ -47,7 +50,13 @@ async function loadMatrix() {
     const comp = r.competitors.lowest_pack_price ? won(r.competitors.lowest_pack_price) : "–";
     const compCell = el("td", comp, "num"); if (r.competitors.out_of_stock) compCell.append(el("br"), el("small", r.competitors.out_of_stock + "/" + r.competitors.listings + " out of stock"));
     const star = el("button", watch.has(r.std_item_id) ? "★" : "☆");
-    star.onclick = async () => { watch.has(r.std_item_id) ? watch.delete(r.std_item_id) : watch.add(r.std_item_id); await api("/watchlist", { method: "PUT", body: JSON.stringify({ std_item_ids: [...watch] }) }); loadMatrix(); };
+    star.onclick = async () => {
+      const had = watch.has(r.std_item_id);
+      had ? watch.delete(r.std_item_id) : watch.add(r.std_item_id);
+      try { await api("/watchlist", { method: "PUT", body: JSON.stringify({ std_item_ids: [...watch] }) }); toast(""); }
+      catch (e) { had ? watch.add(r.std_item_id) : watch.delete(r.std_item_id); toast(e.message); return; }   // roll back local state
+      loadMatrix();
+    };
     const starCell = el("td"); starCell.append(star);
     tr.append(name, el("td", r.channel_name), el("td", bench, "num"), el("td", won(r.internal.current_selling_price), "num"), margin, compCell, el("td", won(r.stock_qty) + (r.remaining_days != null ? " (D-" + r.remaining_days + ")" : ""), "num"), starCell);
     body.append(tr);
@@ -63,8 +72,35 @@ async function loadRecs() {
     for (const [k, v] of Object.entries(r.flags)) if (k === k.toUpperCase() && v) flags.append(el("span", k.replace(/_/g, " "), "pill " + (k.startsWith("REVERSE") ? "red" : "amber")));
     const act = el("td");
     const next = { PENDING: ["approve", "reject"], APPROVED: ["apply"], APPLIED: ["revert"] }[r.status] || [];
-    if (canDecide) for (const a of next) { const b = el("button", a); b.onclick = async () => { try { await api("/recommendations/" + r.rec_id + "/" + a, { method: "POST" }); await Promise.all([loadRecs(), loadMatrix()]); } catch (e) { alert(e.message); } }; act.append(b); }
+    if (canDecide) for (const a of next) { const b = el("button", a); b.onclick = async () => { try { await api("/recommendations/" + r.rec_id + "/" + a, { method: "POST" }); await Promise.all([loadRecs(), loadMatrix()]); } catch (e) { toast(e.message); } }; act.append(b); }
     tr.append(el("td", r.rec_id), el("td", r.item_name), el("td", r.channel_name), el("td", won(r.current_price), "num"), el("td", won(r.suggested_price), "num"), el("td", r.reason_code), flags, el("td", r.status), act);
+    body.append(tr);
+  }
+}
+
+async function post(path, reload) {
+  try { await api(path, { method: "POST" }); toast(""); await reload(); } catch (e) { toast(e.message); }
+}
+
+async function loadReview() {
+  const { items } = await api("/review");
+  const body = $("#review-table tbody"); body.replaceChildren();
+  for (const r of items) {
+    const done = el("button", "resolve"); done.onclick = () => post("/review/" + r.review_id + "/resolve", loadReview);
+    const act = el("td"); act.append(done);
+    const tr = el("tr"); tr.append(el("td", r.review_id), el("td", r.kind), el("td", r.source), el("td", r.item_key), el("td", r.reason), act);
+    body.append(tr);
+  }
+}
+
+async function loadSelectors() {
+  const { candidates } = await api("/selectors");
+  const body = $("#selectors-table tbody"); body.replaceChildren();
+  for (const c of candidates) {
+    const act = el("td");
+    if (c.status === "PENDING") for (const a of ["approve", "reject"]) { const b = el("button", a); b.onclick = () => post("/selectors/" + c.cand_id + "/" + a, loadSelectors); act.append(b); }
+    const tr = el("tr");
+    tr.append(el("td", c.cand_id), el("td", c.platform), el("td", c.status), el("td", c.selectors.item), el("td", c.selectors.fields.title.css), el("td", c.selectors.fields.sale_price.css), act);
     body.append(tr);
   }
 }

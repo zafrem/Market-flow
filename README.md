@@ -86,3 +86,21 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"      # put the outp
   (de-duplicated) instead of only logged. `cli review` / `resolve ID`, or `GET /review`, `POST /review/{id}/resolve`.
 - **Selector candidates**: when the LLM heals a page, the verified replacement selectors are saved as `PENDING`.
   `cli selectors`, `approve-selector ID --as kim:MD` (or `POST /selectors/{id}/approve`) writes them to `config/overrides.json`.
+
+## Docker (full stack)
+
+```bash
+cp .env.example .env     # set MYSQL_ROOT_PASSWORD, MYSQL_PASSWORD, JWT_SECRET (compose refuses to start without it)
+docker compose up --build -d
+docker compose exec backend-api python -m marketflow.cli add-user admin@example.com "Admin" ADMIN
+# dashboard + API: http://127.0.0.1:8000   (localhost only; put a TLS reverse proxy in front for remote access)
+```
+
+Services: `db` (MySQL 8, schema from `db/init`), `redis`, `collector-worker` (scheduler), `backend-api`. Status: the MySQL
+path (DDL with partitions, upserts) has **not** been exercised against a live MySQL yet - run the `-m mysql` tests first.
+
+## Dashboard tests
+
+```bash
+cd tests/js && npm install && npm test      # real app.js + index.html in jsdom against a fake API; also run by pytest
+```

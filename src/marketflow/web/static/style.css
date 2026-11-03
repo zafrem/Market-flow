@@ -16,3 +16,4 @@ td.num { text-align:right; font-variant-numeric:tabular-nums; } small { color:va
 .pill { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; border:1px solid currentColor; margin-right:4px; }
 .red { color:var(--red); } .amber { color:var(--amber); } .green { color:var(--green); }
 #login-error { color:var(--red); margin:0; min-height:1.2em; }
+#toast { min-height:1.4em; margin:0 0 8px; color:var(--red); }
