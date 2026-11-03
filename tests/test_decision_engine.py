@@ -131,6 +131,20 @@ def test_cooldown_after_applied_change():
     assert evaluate(r, ctx([comp(9000)], last=NOW - timedelta(hours=7)), CFG, NOW) is not None
 
 
+def test_cooldown_holds_the_price_but_not_the_safety_alerts():
+    recent = NOW - timedelta(hours=2)
+    # spoilage during cool-down: no price move, but the flag and alert still come through
+    spoiling = evaluate(row(stock_qty=300, lifecycle_metric={"remaining_days": 2}, daily_sales_qty=100),
+                        ctx([], sales=(100, 100, 100), last=recent), CFG, NOW)
+    assert spoiling.flags["SPOILAGE_RISK_FLAG"] and spoiling.suggested_price == 10000
+    assert spoiling.status == "SUPPRESSED" and spoiling.reason_code == "COOLDOWN_HOLD" and int(spoiling.flags["COOLDOWN_HOLD"]) < 10000
+    # reverse margin during cool-down: still red
+    rev = evaluate(row(), ctx([comp(5000)], last=recent), CFG, NOW)
+    assert rev.flags["REVERSE_MARGIN_WARNING"] == "RED" and rev.suggested_price == 10000
+    # a plain competitive cut stays fully blocked, as before
+    assert evaluate(row(min_price_floor=5000), ctx([comp(9000)], last=recent), CFG, NOW) is None
+
+
 def test_low_margin_alert_even_without_a_price_change():
     rec = evaluate(row(current_selling_price=8300, min_price_floor=8186), ctx(), CFG, NOW)
     assert rec.flags["LOW_MARGIN"] is True and rec.status == "SUPPRESSED" and rec.reason_code == "LOW_MARGIN"

@@ -39,8 +39,7 @@ def usable_competitors(ctx: Context, cfg: DecisionConfig, now: datetime) -> list
 
 def evaluate(row: dict[str, Any], ctx: Context, cfg: DecisionConfig, now: datetime) -> Recommendation | None:
     current, floor = int(row["current_selling_price"]), int(row["min_price_floor"])
-    if ctx.last_change_at and now - ctx.last_change_at < timedelta(hours=float(cfg.cooldown_hours)):
-        return None                                                    # cool-down after an applied change
+    cooling = bool(ctx.last_change_at and now - ctx.last_change_at < timedelta(hours=float(cfg.cooldown_hours)))
     stock = int(row["stock_qty"])
     rr = run_rate(stock, ctx.recent_daily_sales)
     life = row.get("lifecycle_metric") or {}
@@ -96,6 +95,12 @@ def evaluate(row: dict[str, Any], ctx: Context, cfg: DecisionConfig, now: dateti
             flags["vacuum_pct"] = str(q2(pct))
 
     alerts = any(k in flags for k in ("REVERSE_MARGIN_WARNING", "SPOILAGE_RISK_FLAG", "LOW_MARGIN", "WHOLESALE_GUARD"))
+    if cooling:                       # cool-down holds the PRICE after a change, never the hazard alerts. LOW_MARGIN /
+        if not any(k in flags for k in ("REVERSE_MARGIN_WARNING", "SPOILAGE_RISK_FLAG")):   # WHOLESALE_GUARD stay quiet: the
+            return None                                                                      # MD just chose this price
+        if suggested != current:
+            flags["COOLDOWN_HOLD"] = str(suggested)
+            suggested, reason = current, "COOLDOWN_HOLD"
     if suggested == current and not alerts:
         return None
     if reason == "NO_CHANGE" and "LOW_MARGIN" in flags:

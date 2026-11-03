@@ -223,7 +223,7 @@ Internal cost accounting, warehouse balance, and velocity snapshot.
     1. Gather competitor normalized unit prices for the item from in-stock listings with `match_confidence >= 0.8`, in the same `region_code`, scraped within the last 24h. If none, produce no recommendation.
     2. Reference price $R$ = the lowest competitor price, converted to this item's pack size via `pack_size_factor`.
     3. Target $T = R \times (1 - u)$, where $u$ is the undercut ratio (default `0%`, i.e. match; range 0–5%).
-    4. Cap movement: $|T - \text{current}| / \text{current} \le$ `max_step` (default 10% per run) to avoid oscillation; apply a cool-down (default 6h) after any applied change.
+    4. Cap movement: $|T - \text{current}| / \text{current} \le$ `max_step` (default 10% per run) to avoid oscillation; apply a cool-down (default 6h) after any applied change. The cool-down holds only the price: spoilage and reverse-margin warnings are still raised (low-margin and wholesale-guard stay quiet, as they follow from the change just applied) (recommendation `SUPPRESSED`, reason `COOLDOWN_HOLD`, held price in `flags.COOLDOWN_HOLD`).
     5. Wholesale guard: if the public benchmark index rose more than a configurable threshold since the last run, do not recommend a decrease for that item.
     6. Clamp to floor: Suggested Price $= \max(T, \text{min\_price\_floor})$.
     Alternative strategies (`MARGIN_TARGET`, `BENCHMARK_MARKUP`) implement the same `PricingStrategy` interface and are selected via configuration.
