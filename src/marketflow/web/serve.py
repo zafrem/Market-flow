@@ -18,4 +18,8 @@ def uvicorn_kwargs(s: Settings, host: str, port: int) -> dict:
     elif host not in ("127.0.0.1", "localhost", "::1") and not s.hsts:
         print("WARNING: serving plain HTTP on a non-local address; set server.tls_cert/tls_key or terminate TLS at a proxy "
               "(then set server.hsts = true).")
+    if s.trust_proxy:          # only these addresses may set X-Forwarded-For; never trust it from arbitrary clients
+        kw.update(proxy_headers=True, forwarded_allow_ips=s.trust_proxy)
+    else:
+        kw.update(proxy_headers=False)
     return kw

@@ -167,6 +167,12 @@ class OpsRepository:
         sql = "SELECT * FROM price_recommendations" + (" WHERE status=:s" if status else "") + " ORDER BY rec_id"
         return self._rows(sql, **({"s": status} if status else {}))
 
+    def applied_since(self, since: datetime) -> list[dict[str, Any]]:
+        rows = self._rows("SELECT * FROM price_recommendations WHERE status='APPLIED' AND decided_at >= :s ORDER BY rec_id", s=since)
+        for r in rows:
+            r["flags"] = json.loads(r["flags"]) if isinstance(r["flags"], str) else (r["flags"] or {})
+        return rows
+
     def transition(self, rec_id: int, expect: str, new: str, actor: str, now: datetime) -> bool:
         """Atomic compare-and-set: only moves the recommendation if it is still in `expect`."""
         with self._e.begin() as c:

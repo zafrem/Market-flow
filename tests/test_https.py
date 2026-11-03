@@ -22,7 +22,9 @@ def test_hsts_only_when_https_is_in_play(tmp_path):
 
 
 def test_uvicorn_kwargs(tmp_path, capsys):
-    assert uvicorn_kwargs(Settings(), "127.0.0.1", 8000) == {"host": "127.0.0.1", "port": 8000}
+    assert uvicorn_kwargs(Settings(), "127.0.0.1", 8000) == {"host": "127.0.0.1", "port": 8000, "proxy_headers": False}
+    px = uvicorn_kwargs(Settings(trust_proxy="10.0.0.5"), "127.0.0.1", 8000)
+    assert px["proxy_headers"] is True and px["forwarded_allow_ips"] == "10.0.0.5"
     cert, key = tmp_path / "c.pem", tmp_path / "k.pem"
     cert.write_text("x"); key.write_text("y")
     kw = uvicorn_kwargs(Settings(tls_cert=str(cert), tls_key=str(key)), "0.0.0.0", 443)

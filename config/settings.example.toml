@@ -19,6 +19,7 @@ token_ttl_minutes = 60 # env: TOKEN_TTL_MINUTES
 tls_cert = ""          # env: TLS_CERT  (PEM)
 tls_key  = ""          # env: TLS_KEY   (PEM)
 hsts = false           # env: HSTS
+trust_proxy = ""       # env: TRUST_PROXY. Reverse proxy address(es), e.g. "127.0.0.1": makes login throttling use the real client IP
 
 [alerts]
 # Slack-compatible incoming webhook (https). Alerts carry margin data: point it at a channel only MD/ADMIN can read.
