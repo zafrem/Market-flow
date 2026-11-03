@@ -40,6 +40,8 @@ class Scheduler:
         """Sleep until the next due time, then run every job due then (sequentially). Returns the job names run."""
         when, due = self.next_due()
         await self._sleep(max((when - self._tp.now()).total_seconds(), 0))
+        if (left := (when - self._tp.now()).total_seconds()) > 0:     # woke early (monotonic vs wall clock): never run a slot early
+            await self._sleep(left)
         for job in due:
             try:
                 await job.run()

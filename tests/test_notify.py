@@ -158,3 +158,23 @@ def test_stockout_detection_requires_a_transition(env):
     assert [e["channel_item_code"] for e in ev] == ["FLIP"]
     a = alerts_from_stockouts(ev)[0]
     assert a.key == "STOCKOUT:SHOPA:FLIP" and "Apple" in a.text
+
+
+async def test_overflow_summary_is_deduplicated_across_runs(env):
+    hook = Webhook()
+    n = env.make(hook, max_per_run=2)
+    alerts = [Alert(f"K{i}", "INFO", f"alert {i}") for i in range(5)]
+    await n.dispatch(alerts)
+    assert sum("more alert(s)" in p[1]["text"] for p in hook.posts) == 1
+    await n.dispatch([Alert(f"N{i}", "INFO", f"new {i}") for i in range(5)])    # different overflow set, same window
+    assert sum("more alert(s)" in p[1]["text"] for p in hook.posts) == 1
+
+
+async def test_overflow_summary_is_deduplicated_across_runs(env):
+    hook = Webhook()
+    n = env.make(hook, max_per_run=2)
+    batch = lambda tag: [Alert(f"{tag}{i}", "INFO", f"a{i}") for i in range(5)]
+    await n.dispatch(batch("A"))
+    first = len(hook.posts)                                                    # 2 alerts + 1 summary
+    await n.dispatch(batch("B"))                                               # different keys, still overflowing
+    assert sum("more alert(s)" in p[1]["text"] for p in hook.posts) == 1 and len(hook.posts) == first + 2

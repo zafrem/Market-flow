@@ -96,6 +96,11 @@ class OpsRepository:
                           "AND recorded_date <= :d ORDER BY recorded_date DESC LIMIT :n", s=sku, c=channel, d=upto, n=n)
         return [int(r["daily_sales_qty"]) for r in rows]
 
+    def live_price(self, sku: str, channel: str) -> int | None:
+        r = self._rows("SELECT current_selling_price FROM int_operations_inventory WHERE internal_sku=:s AND channel_name=:c "
+                       "ORDER BY recorded_date DESC LIMIT 1", s=sku, c=channel)
+        return int(r[0]["current_selling_price"]) if r else None
+
     def set_price(self, sku: str, channel: str, price: int) -> bool:
         latest = self._rows("SELECT internal_id, recorded_date FROM int_operations_inventory WHERE internal_sku=:s AND "
                             "channel_name=:c ORDER BY recorded_date DESC LIMIT 1", s=sku, c=channel)
@@ -139,7 +144,7 @@ class OpsRepository:
     def has_open_duplicate(self, rec, since: datetime) -> bool:
         return bool(self._rows(
             "SELECT 1 AS x FROM price_recommendations WHERE std_item_id=:i AND channel_name=:c AND suggested_price=:s "
-            "AND reason_code=:r AND status IN ('PENDING','SUPPRESSED') AND created_at >= :since",
+            "AND reason_code=:r AND status IN ('PENDING','SUPPRESSED','REJECTED') AND created_at >= :since",
             i=rec.std_item_id, c=rec.channel_name, s=rec.suggested_price, r=rec.reason_code, since=since))
 
     def insert_recommendation(self, rec, now: datetime) -> int:
@@ -161,6 +166,13 @@ class OpsRepository:
     def list_recommendations(self, status: str | None = None) -> list[dict[str, Any]]:
         sql = "SELECT * FROM price_recommendations" + (" WHERE status=:s" if status else "") + " ORDER BY rec_id"
         return self._rows(sql, **({"s": status} if status else {}))
+
+    def transition(self, rec_id: int, expect: str, new: str, actor: str, now: datetime) -> bool:
+        """Atomic compare-and-set: only moves the recommendation if it is still in `expect`."""
+        with self._e.begin() as c:
+            res = c.execute(text("UPDATE price_recommendations SET status=:n, decided_by=:a, decided_at=:t "
+                                 "WHERE rec_id=:i AND status=:e"), self._b({"n": new, "a": actor, "t": now, "i": rec_id, "e": expect}))
+            return res.rowcount == 1
 
     def set_status(self, rec_id: int, status: str, actor: str, now: datetime) -> None:
         with self._e.begin() as c:

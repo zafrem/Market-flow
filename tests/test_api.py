@@ -266,3 +266,31 @@ def test_dashboard_and_security_headers(world):
     assert "default-src 'self'" in r.headers["content-security-policy"] and r.headers["x-content-type-options"] == "nosniff"
     assert world.client.get("/static/app.js").status_code == 200 and world.client.get("/openapi.json").status_code == 404
     assert "<script>" not in r.text.replace('<script src="/static/app.js"></script>', "")   # no inline script (CSP-safe)
+
+
+def test_cannot_remove_the_last_active_admin(world):
+    h, aid = login(world, "admin"), world.users["admin"]
+    other = world.repo.create_user("admin2@x.com", "a2", "ADMIN", hash_password(PW))
+    assert world.client.patch(f"/admin/users/{other}", headers=h, json={"role": "MD"}).status_code == 200    # two admins: fine
+    # one admin left now; a second admin (made via DB) tries to deactivate the only other admin, then is itself last
+    other2 = world.repo.create_user("admin3@x.com", "a3", "ADMIN", hash_password(PW))
+    h3 = login(world, "admin3")
+    assert world.client.patch(f"/admin/users/{aid}", headers=h3, json={"active": False}).status_code == 200
+    r = world.client.patch(f"/admin/users/{other2}", headers=h3, json={"role": "BUYER"})
+    assert r.status_code == 409                                                                               # self-demotion blocked
+    assert world.repo.update_user(other2, "BUYER", None) is False                                              # and the repo guard holds
+    assert world.repo.user_by_id(other2)["role"] == "ADMIN"
+
+
+def test_cannot_remove_the_last_active_admin(world):
+    h = login(world, "admin")
+    second = world.client.post("/admin/users", headers=h, json={"email": "a2@x.com", "name": "A2", "role": "ADMIN", "password": "a-long-password"}).json()["user_id"]
+    # the second admin cannot strip the first (only) other admin once self-demotion is the sole path left
+    h2 = {"Authorization": "Bearer " + world.client.post("/auth/login", json={"email": "a2@x.com", "password": "a-long-password"}).json()["access_token"]}
+    assert world.client.patch(f"/admin/users/{world.users['admin']}", headers=h2, json={"active": False}).status_code == 200   # a2 remains
+    assert world.client.patch(f"/admin/users/{second}", headers=h2, json={"role": "MD"}).status_code == 409                    # self
+    h3 = world.repo.create_user("a3@x.com", "A3", "ADMIN", hash_password(PW))
+    assert world.repo.update_user(second, "MD", None) is True                                                                 # a3 is still an admin
+    assert world.repo.update_user(h3, None, False) is False                                                                   # would leave none
+    assert world.repo.update_user(h3, "BUYER", None) is False
+    assert world.repo.update_user(h3, "ADMIN", True) is True

@@ -87,9 +87,11 @@ class Notifier:
         res.overflow = len(rest)
         for a in to_send:
             await self._send_one(a, f"{SEVERITY_ICON.get(a.severity, '')} {slack_escape(a.text)}".strip(), res)
-        if rest:                                               # one summary instead of a flood
-            summary = Alert("OVERFLOW:" + ",".join(sorted(x.key for x in rest))[:200], "INFO",
+        if rest:                                               # one summary instead of a flood, itself de-duplicated
+            summary = Alert("OVERFLOW", "INFO",
                             f"{len(rest)} more alert(s) suppressed by the per-run cap of {self._cap}; see the dashboard.")
+            if self._q.recently_sent(summary.key, self._now() - self._window):
+                return res
             await self._send_one(summary, SEVERITY_ICON["INFO"] + " " + slack_escape(summary.text), res)
         return res
 

@@ -65,39 +65,52 @@ def _require_decider(actor: Actor) -> None:
         raise PermissionError(f"role {actor.role} may not decide on price recommendations")
 
 
-def approve(repo: OpsRepository, tp: TimeProvider, rec_id: int, actor: Actor) -> None:
+def _move(repo: OpsRepository, tp: TimeProvider, rec_id: int, actor: Actor, expect: str, new: str, action: str) -> dict[str, Any]:
+    """Validate, then claim the transition atomically so concurrent deciders cannot both win."""
     _require_decider(actor)
-    r = _load(repo, rec_id, {"PENDING"})
-    repo.set_status(rec_id, "APPROVED", actor.name, _naive_utc(tp))
-    repo.audit(actor.name, "RECOMMENDATION_APPROVED", {"status": r["status"]}, {"rec_id": rec_id, "status": "APPROVED"}, _naive_utc(tp))
+    r = _load(repo, rec_id, {expect})
+    now = _naive_utc(tp)
+    if not repo.transition(rec_id, expect, new, actor.name, now):
+        raise WorkflowError(f"recommendation {rec_id} was changed by someone else; reload and retry")
+    repo.audit(actor.name, action, {"status": expect}, {"rec_id": rec_id, "status": new}, now)
+    return r
+
+
+def approve(repo: OpsRepository, tp: TimeProvider, rec_id: int, actor: Actor) -> None:
+    _move(repo, tp, rec_id, actor, "PENDING", "APPROVED", "RECOMMENDATION_APPROVED")
 
 
 def reject(repo: OpsRepository, tp: TimeProvider, rec_id: int, actor: Actor) -> None:
+    _move(repo, tp, rec_id, actor, "PENDING", "REJECTED", "RECOMMENDATION_REJECTED")
+
+
+def _guarded_price_change(repo: OpsRepository, tp: TimeProvider, rec_id: int, actor: Actor, expect: str, new: str,
+                          expect_live: str, target: str, action: str) -> None:
+    """Move the price only if the live price still equals what this recommendation was based on."""
     _require_decider(actor)
-    r = _load(repo, rec_id, {"PENDING"})
-    repo.set_status(rec_id, "REJECTED", actor.name, _naive_utc(tp))
-    repo.audit(actor.name, "RECOMMENDATION_REJECTED", {"status": r["status"]}, {"rec_id": rec_id, "status": "REJECTED"}, _naive_utc(tp))
+    r = _load(repo, rec_id, {expect})
+    sku = r["flags"]["metrics"]["internal_sku"]
+    live = repo.live_price(sku, r["channel_name"])
+    if live is None:
+        raise WorkflowError(f"no inventory row for {sku}/{r['channel_name']}")
+    if live != r[expect_live]:
+        raise WorkflowError(f"price of {sku}/{r['channel_name']} is now {live}, not {r[expect_live]}; "
+                            f"this recommendation is stale")
+    now = _naive_utc(tp)
+    if not repo.transition(rec_id, expect, new, actor.name, now):       # decided_at restarts the cool-down clock
+        raise WorkflowError(f"recommendation {rec_id} was changed by someone else; reload and retry")
+    if not repo.set_price(sku, r["channel_name"], r[target]):
+        repo.set_status(rec_id, expect, r["decided_by"] or actor.name, r["decided_at"] or now)   # undo the claim
+        raise WorkflowError(f"no inventory row for {sku}/{r['channel_name']}")
+    repo.audit(actor.name, action, {"sku": sku, "price": live}, {"sku": sku, "price": r[target]}, now)
 
 
 def apply(repo: OpsRepository, tp: TimeProvider, rec_id: int, actor: Actor) -> None:
-    _require_decider(actor)
-    r = _load(repo, rec_id, {"APPROVED"})
-    sku = r["flags"]["metrics"]["internal_sku"]
-    if not repo.set_price(sku, r["channel_name"], r["suggested_price"]):
-        raise WorkflowError(f"no inventory row for {sku}/{r['channel_name']}")
-    now = _naive_utc(tp)
-    repo.set_status(rec_id, "APPLIED", actor.name, now)     # decided_at restarts the cool-down clock
-    repo.audit(actor.name, "PRICE_APPLIED", {"sku": sku, "price": r["current_price"]}, {"sku": sku, "price": r["suggested_price"]}, now)
+    _guarded_price_change(repo, tp, rec_id, actor, "APPROVED", "APPLIED", "current_price", "suggested_price", "PRICE_APPLIED")
 
 
 def revert(repo: OpsRepository, tp: TimeProvider, rec_id: int, actor: Actor) -> None:
-    _require_decider(actor)
-    r = _load(repo, rec_id, {"APPLIED"})
-    sku = r["flags"]["metrics"]["internal_sku"]
-    repo.set_price(sku, r["channel_name"], r["current_price"])
-    now = _naive_utc(tp)
-    repo.set_status(rec_id, "REVERTED", actor.name, now)
-    repo.audit(actor.name, "PRICE_REVERTED", {"sku": sku, "price": r["suggested_price"]}, {"sku": sku, "price": r["current_price"]}, now)
+    _guarded_price_change(repo, tp, rec_id, actor, "APPLIED", "REVERTED", "suggested_price", "current_price", "PRICE_REVERTED")
 
 
 def price_changes(repo: OpsRepository, since: datetime) -> list[dict[str, Any]]:

@@ -46,6 +46,21 @@ class AppRepository(Repo):
         with self._e.begin() as c:
             c.execute(text("UPDATE users SET role = :r WHERE user_id = :i"), {"r": role, "i": uid})
 
+    def update_user(self, uid: int, role: str | None, active: bool | None) -> bool:
+        """One transaction. Refuses (returns False) if it would leave no active ADMIN."""
+        with self._e.begin() as c:
+            row = c.execute(text("SELECT role, active FROM users WHERE user_id=:i FOR UPDATE" if self._e.dialect.name != "sqlite"
+                                 else "SELECT role, active FROM users WHERE user_id=:i"), {"i": uid}).mappings().first()
+            if row is None:
+                return False
+            new_role, new_active = role or row["role"], int(row["active"] if active is None else active)
+            if row["role"] == "ADMIN" and row["active"] and (new_role != "ADMIN" or not new_active):
+                others = c.execute(text("SELECT COUNT(*) FROM users WHERE role='ADMIN' AND active=1 AND user_id<>:i"), {"i": uid}).scalar()
+                if not others:
+                    return False
+            c.execute(text("UPDATE users SET role=:r, active=:a WHERE user_id=:i"), {"r": new_role, "a": new_active, "i": uid})
+            return True
+
     def scope_for(self, user: dict[str, Any]) -> Scope:
         if user["role"] == "ADMIN":
             return None

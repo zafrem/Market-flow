@@ -249,10 +249,8 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
             raise HTTPException(404, "user not found")
         if uid == admin.user_id and (body.active is False or (body.role and body.role != "ADMIN")):
             raise HTTPException(409, "admins cannot demote or deactivate themselves")
-        if body.role:
-            repo.set_role(uid, body.role)
-        if body.active is not None:
-            repo.set_active(uid, body.active)
+        if not repo.update_user(uid, body.role, body.active):
+            raise HTTPException(409, "refused: this would leave no active administrator")
         repo.audit(admin.email, "USER_UPDATED", {"role": target["role"], "active": bool(target["active"])},
                    body.model_dump(exclude_none=True), now())
         return {"ok": True}

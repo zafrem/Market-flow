@@ -170,3 +170,88 @@ def test_export_prices_lists_only_applied_changes(env, tmp_path):
     f = tmp_path / "o.csv"
     cli.main(["export-prices", "--since", "2026-11-04", "--file", str(f)], settings=s, tp=tp, out=io.StringIO())
     assert f.read_text(encoding="utf-8-sig").strip().count("\n") == 0          # header only: nothing after the cutoff
+
+
+def test_apply_refuses_a_stale_recommendation(env):
+    repo, tp, e, s, _ = env
+    service.run_decisions(repo, s, tp)
+    service.approve(repo, tp, 1, MD)
+    with e.begin() as c:                                               # someone repriced the item after the rec was made
+        c.execute(text("UPDATE int_operations_inventory SET current_selling_price=9700 WHERE internal_sku='APPLE-1'"))
+    with pytest.raises(WorkflowError, match="stale"):
+        service.apply(repo, tp, 1, MD)
+    assert price(e, "APPLE-1") == 9700 and repo.get_recommendation(1)["status"] == "APPROVED"
+
+
+def test_revert_refuses_when_price_moved_on(env):
+    repo, tp, e, s, _ = env
+    service.run_decisions(repo, s, tp)
+    service.approve(repo, tp, 1, MD); service.apply(repo, tp, 1, MD)
+    with e.begin() as c:
+        c.execute(text("UPDATE int_operations_inventory SET current_selling_price=8800 WHERE internal_sku='APPLE-1'"))
+    with pytest.raises(WorkflowError, match="stale"):
+        service.revert(repo, tp, 1, MD)
+    assert price(e, "APPLE-1") == 8800 and repo.get_recommendation(1)["status"] == "APPLIED"
+
+
+def test_losing_the_race_does_not_apply_twice(env):
+    repo, tp, e, s, _ = env
+    service.run_decisions(repo, s, tp)
+    service.approve(repo, tp, 1, MD)
+    assert repo.transition(1, "APPROVED", "APPLIED", "other", T0.replace(tzinfo=None))      # a concurrent decider wins first
+    with pytest.raises(WorkflowError):
+        service.apply(repo, tp, 1, MD)
+    assert price(e, "APPLE-1") == 10000                                                    # loser did not touch the price
+    assert not repo.transition(1, "APPROVED", "REJECTED", "x", T0.replace(tzinfo=None))   # compare-and-set refuses
+
+
+def test_rejected_recommendation_is_not_recreated_on_next_run(env):
+    repo, tp, e, s, _ = env
+    service.run_decisions(repo, s, tp)
+    service.reject(repo, tp, 1, MD)
+    again = service.run_decisions(repo, s, tp)
+    assert not any(r.internal_sku == "APPLE-1" and r.reason_code == "COMPETITIVE_MATCH" for _, r in again)
+
+
+def test_apply_refuses_when_the_live_price_changed(env):
+    repo, tp, e, s, _ = env
+    service.run_decisions(repo, s, tp)
+    service.approve(repo, tp, 1, MD)
+    with e.begin() as c:
+        c.execute(text("UPDATE int_operations_inventory SET current_selling_price = 9700 WHERE internal_sku = 'APPLE-1'"))
+    with pytest.raises(WorkflowError, match="stale"):
+        service.apply(repo, tp, 1, MD)
+    assert price(e, "APPLE-1") == 9700 and repo.get_recommendation(1)["status"] == "APPROVED"      # untouched, retryable after review
+
+
+def test_revert_refuses_when_someone_changed_the_price_since(env):
+    repo, tp, e, s, _ = env
+    service.run_decisions(repo, s, tp)
+    service.approve(repo, tp, 1, MD); service.apply(repo, tp, 1, MD)
+    with e.begin() as c:
+        c.execute(text("UPDATE int_operations_inventory SET current_selling_price = 9200 WHERE internal_sku = 'APPLE-1'"))
+    with pytest.raises(WorkflowError, match="stale"):
+        service.revert(repo, tp, 1, MD)
+    assert price(e, "APPLE-1") == 9200 and repo.get_recommendation(1)["status"] == "APPLIED"
+
+
+def test_losing_a_concurrent_decision_is_a_conflict_not_a_double_apply(env, monkeypatch):
+    repo, tp, e, s, _ = env
+    service.run_decisions(repo, s, tp)
+    service.approve(repo, tp, 1, MD)
+    real = repo.transition
+    def other_user_wins_first(rec_id, expect, new, actor, now):
+        real(rec_id, expect, "REJECTED", "other", now)                    # a concurrent decider got there first
+        return real(rec_id, expect, new, actor, now)
+    monkeypatch.setattr(repo, "transition", other_user_wins_first)
+    with pytest.raises(WorkflowError, match="someone else"):
+        service.apply(repo, tp, 1, MD)
+    assert price(e, "APPLE-1") == 10000
+
+
+def test_rejected_recommendation_is_not_recreated_on_the_next_run(env):
+    repo, tp, e, s, _ = env
+    service.run_decisions(repo, s, tp)
+    service.reject(repo, tp, 1, MD)
+    again = service.run_decisions(repo, s, tp)
+    assert [r.internal_sku for _, r in again if r.reason_code == "COMPETITIVE_MATCH"] == []
