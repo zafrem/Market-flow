@@ -104,3 +104,17 @@ async function loadSelectors() {
     body.append(tr);
   }
 }
+
+// Applied price changes as CSV for a manual channel bulk upload (the system never writes to a channel itself).
+const csvCell = (v) => { let s = String(v ?? ""); if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };   // also defuses spreadsheet formulas
+function appliedCsv(recs) {
+  const rows = recs.filter((r) => r.status === "APPLIED").map((r) => [r.flags?.metrics?.internal_sku, r.channel_name, r.suggested_price, r.current_price, r.rec_id, r.decided_at, r.decided_by]);
+  return ["internal_sku,channel_name,new_price,previous_price,rec_id,applied_at,applied_by", ...rows.map((c) => c.map(csvCell).join(","))].join("\n") + "\n";
+}
+$("#export-applied").addEventListener("click", async () => {
+  try {
+    const { recommendations } = await api("/recommendations?status=APPLIED");
+    const url = URL.createObjectURL(new Blob(["\ufeff" + appliedCsv(recommendations)], { type: "text/csv" }));
+    const a = el("a"); a.href = url; a.download = "price-changes.csv"; document.body.append(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  } catch (e) { toast(e.message); }
+});

@@ -179,3 +179,28 @@ test("a failed watchlist save is reported and the star does not lie", async () =
   const puts = t.calls.filter((c) => c.method === "PUT");
   assert.deepEqual(puts.map((p) => JSON.parse(p.body).std_item_ids), [[1], [1]]);
 });
+
+test("export button downloads applied changes as CSV, with formula defusing", async () => {
+  const t = boot({ routes: { "GET /recommendations": () => [200, { recommendations: [
+    { rec_id: 2, item_name: "Apple", channel_name: "SHOPA", current_price: 9000, suggested_price: 9500, flags: { metrics: { internal_sku: "=EVIL,1" } }, status: "APPLIED", decided_at: "2026-11-03T01:00:00", decided_by: "k@x.com" },
+    { rec_id: 1, item_name: "Apple", channel_name: "SHOPA", current_price: 10000, suggested_price: 9000, flags: {}, status: "PENDING" }] }] } });
+  let blob = null, name = null;
+  t.w.URL.createObjectURL = (b) => { blob = b; return "blob:x"; };
+  t.w.URL.revokeObjectURL = () => {};
+  t.w.HTMLAnchorElement.prototype.click = function () { name = this.download; };
+  await t.login();
+  await t.click(t.d.querySelector("#export-applied"));
+  assert.equal(name, "price-changes.csv");
+  const csv = await new Promise((res) => { const fr = new t.w.FileReader(); fr.onload = () => res(fr.result); fr.readAsText(blob); });
+  assert.match(csv, /^internal_sku,channel_name,new_price/);          // FileReader strips the BOM that Excel needs; checked in bytes below
+  const head = await new Promise((res) => { const fr = new t.w.FileReader(); fr.onload = () => res(new Uint8Array(fr.result)); fr.readAsArrayBuffer(blob.slice(0, 3)); });
+  assert.deepEqual([...head], [0xef, 0xbb, 0xbf]);
+  assert.match(csv, /"'=EVIL,1",SHOPA,9500,9000,2,/);
+  assert.equal(csv.trim().split("\n").length, 2);                        // PENDING row excluded
+  assert.ok(t.calls.some((c) => c.path === "/recommendations?status=APPLIED"));
+});
+
+test("BUYER does not see the export button", async () => {
+  const t = boot({ role: "BUYER" }); await t.login();
+  assert.equal(t.d.querySelector("#export-applied").closest(".decider").hidden, true);
+});
