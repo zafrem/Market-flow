@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS int_operations_inventory (
   channel_fee_rate DECIMAL(5,2) NOT NULL COMMENT 'percent, 11.50 = 11.5%',
   promo_cost DECIMAL(10,2) NOT NULL DEFAULT 0,
   vat_inclusive TINYINT(1) NOT NULL DEFAULT 1,
+  pack_std_units DECIMAL(10,4) NOT NULL DEFAULT 1 COMMENT 'standard units per sale unit',
   current_selling_price INT NOT NULL,
   stock_qty INT NOT NULL,
   daily_sales_qty INT NOT NULL,
@@ -147,8 +148,8 @@ CREATE TABLE IF NOT EXISTS price_recommendations (
   suggested_price INT NOT NULL,
   reason_code VARCHAR(40) NOT NULL,
   flags JSON NULL,
-  status ENUM('PENDING','APPROVED','REJECTED','APPLIED','SUPPRESSED') NOT NULL DEFAULT 'PENDING',
-  decided_by INT NULL,
+  status ENUM('PENDING','APPROVED','REJECTED','APPLIED','SUPPRESSED','REVERTED') NOT NULL DEFAULT 'PENDING',
+  decided_by VARCHAR(100) NULL,
   decided_at DATETIME NULL,
   KEY idx_status (status, created_at),
   FOREIGN KEY (std_item_id) REFERENCES master_products (std_item_id)

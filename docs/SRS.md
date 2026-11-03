@@ -170,7 +170,8 @@ Internal cost accounting, warehouse balance, and velocity snapshot.
 | `current_selling_price`| Live System Price | `INT` | `NOT NULL` | Current active listing price |
 | `stock_qty` | Available Stock | `INT` | `NOT NULL` | Available on hand + allocated cross-dock |
 | `daily_sales_qty` | Daily Units Sold | `INT` | `NOT NULL` | Units dispatched on `recorded_date`; the 3-day average (F-03-3) is derived from the last 3 daily rows |
-| `min_price_floor` | Floor Guard Price | `INT` | `NOT NULL` | Computed by the system: `ceil((COGS + Packaging + Logistics + Promo) / (1 − fee/100 − target_min_margin))`; manual override allowed (ADMIN, audited). Recomputed whenever any cost input changes. |
+| `pack_std_units` | Standard Units per Sale Unit | `DECIMAL(10,4)` | `DEFAULT 1` | Converts competitor per-`standard_unit` prices to this listing's pack (e.g. 1.2 kg = 12 × `100g`) |
+| `min_price_floor` | Floor Guard Price | `INT` | `NOT NULL` | Computed by the system as the lowest integer price whose net margin ≥ `target_min_margin_pct` (closed form `ceil(costs / (k − fee/100))`, `k = (1 − target)/(1 + VAT)` if VAT-inclusive else `(1 − target)`, verified exactly in integer search). Manual override allowed (ADMIN, audited). Recomputed on cost-input changes. |
 | `lifecycle_metric` | Expiry / Age Matrix | `JSON` | `NOT NULL` | `remaining_days` ($D\text{-Day}$), `holding_age_days` |
 
 ### 3.5 Personalization & Watchlists (`users`, `user_category_assignments`, `user_watchlists`, `user_preferences`)
@@ -181,7 +182,7 @@ Internal cost accounting, warehouse balance, and velocity snapshot.
 
 ### 3.6 Channel Product Mapping & Audit (`product_channel_map`, `price_recommendations`, `audit_log`)
 * `product_channel_map`: `platform`, `channel_item_code` (composite PK), `std_item_id` (FK), `pack_size_factor` (`DECIMAL(10,4)`), `match_method` (`BARCODE`, `RULE`, `LLM`, `MANUAL`), `match_confidence`, `reviewed_by`, `reviewed_at`. Matching order: barcode exact → rule/token match (variety, grade, origin, pack size) → LLM-assisted suggestion. Matches below 0.8 confidence enter a manual review queue and are excluded from pricing.
-* `price_recommendations`: `rec_id` (PK), `created_at`, `std_item_id`, `channel_name`, `current_price`, `suggested_price`, `reason_code`, `flags` (`JSON`), `status` (`PENDING`, `APPROVED`, `REJECTED`, `APPLIED`, `SUPPRESSED`), `decided_by`, `decided_at`.
+* `price_recommendations`: `rec_id` (PK), `created_at`, `std_item_id`, `channel_name`, `current_price`, `suggested_price`, `reason_code`, `flags` (`JSON`), `status` (`PENDING`, `APPROVED`, `REJECTED`, `APPLIED`, `SUPPRESSED`, `REVERTED`), `decided_by` (actor name), `decided_at` (also the cool-down clock: set again on apply/revert).
 * `audit_log`: append-only record of price changes, floor overrides, role changes, selector approvals, and match reviews (`actor`, `action`, `before`, `after`, `ts`).
 
 ---

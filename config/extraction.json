@@ -124,5 +124,107 @@
         }
       }
     }
+  },
+  "erp": {
+    "columns": {
+      "recorded_date": [
+        "recorded_date",
+        "date",
+        "기준일",
+        "일자"
+      ],
+      "internal_sku": [
+        "internal_sku",
+        "sku",
+        "상품코드",
+        "품목코드"
+      ],
+      "item_name": [
+        "item_name",
+        "item",
+        "표준상품명",
+        "품목명"
+      ],
+      "std_item_id": [
+        "std_item_id",
+        "표준상품id"
+      ],
+      "channel_name": [
+        "channel_name",
+        "channel",
+        "채널",
+        "판매채널"
+      ],
+      "purchase_cost": [
+        "purchase_cost",
+        "cogs",
+        "매입원가",
+        "원가"
+      ],
+      "fixed_cost": [
+        "fixed_cost",
+        "packaging",
+        "포장비",
+        "가공포장비"
+      ],
+      "logistics_cost": [
+        "logistics_cost",
+        "logistics",
+        "물류비"
+      ],
+      "channel_fee_rate": [
+        "channel_fee_rate",
+        "fee_rate",
+        "수수료율"
+      ],
+      "promo_cost": [
+        "promo_cost",
+        "promo",
+        "프로모션비"
+      ],
+      "vat_inclusive": [
+        "vat_inclusive",
+        "vat",
+        "부가세포함"
+      ],
+      "pack_std_units": [
+        "pack_std_units",
+        "pack_units",
+        "환산수량"
+      ],
+      "current_selling_price": [
+        "current_selling_price",
+        "price",
+        "판매가",
+        "현재판매가"
+      ],
+      "stock_qty": [
+        "stock_qty",
+        "stock",
+        "재고",
+        "재고수량"
+      ],
+      "daily_sales_qty": [
+        "daily_sales_qty",
+        "daily_sales",
+        "일판매량"
+      ],
+      "min_price_floor": [
+        "min_price_floor",
+        "floor",
+        "최저가"
+      ],
+      "remaining_days": [
+        "remaining_days",
+        "d_day",
+        "잔여유통기한",
+        "dday"
+      ],
+      "holding_age_days": [
+        "holding_age_days",
+        "holding_age",
+        "보유일수"
+      ]
+    }
   }
 }

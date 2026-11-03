@@ -58,6 +58,9 @@ def validate(rules: Rules) -> None:
         if p := src.get("alias_strip_pattern"):
             re.compile(p)
     _validate_retail(rules)
+    for need in ("internal_sku", "channel_name", "purchase_cost", "current_selling_price", "stock_qty"):
+        if not rules.get("erp", {}).get("columns", {}).get(need):
+            raise ValueError(f"erp.columns.{need} is required")
 
 
 def _validate_retail(rules: Rules) -> None:

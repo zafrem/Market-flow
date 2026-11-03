@@ -39,3 +39,18 @@ When selectors stop matching, the page is sanitized and sent to the LLM (`llm.mo
 `settings.toml`; default is an offline mock). LLM records are validated and checked against the page text; verified
 replacement selectors are held as a *pending candidate* until a person calls `SelfHealingExtractor.approve(platform, actor)`,
 which writes them to `config/overrides.json`. Optional real-browser transport: `pip install -e '.[browser]' && playwright install chromium`.
+
+## ERP import, decisions & approvals (Phase 3)
+
+```bash
+.venv/bin/python -m marketflow.cli import-erp inventory.xlsx      # .csv or .xlsx; bad rows are reported by line number
+.venv/bin/python -m marketflow.cli decide                         # evaluate today's inventory -> PENDING / SUPPRESSED recommendations
+.venv/bin/python -m marketflow.cli recs --status PENDING
+.venv/bin/python -m marketflow.cli approve 3 --as kim:MD          # MD/ADMIN only; then apply / revert (all audited)
+.venv/bin/python -m marketflow.cli apply 3 --as kim:MD
+.venv/bin/python -m marketflow.cli audit
+```
+
+Header aliases (English/Korean) are in `config/extraction.json` under `erp.columns`; pricing parameters go in the
+`[decision]` table of `config/settings.toml` (see `settings.example.toml`). The engine is advisory: `apply` updates the
+internal ledger only; nothing is written back to a sales channel.

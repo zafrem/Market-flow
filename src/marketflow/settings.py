@@ -5,7 +5,7 @@ import logging
 import os
 import stat
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -31,6 +31,7 @@ class Settings:
     kamis_product_cls: str = "02"
     garak_url: str = ""
     garak_api_key: str = ""
+    decision: Mapping[str, Any] = field(default_factory=dict)   # raw [decision] table
 
     @property
     def kamis_enabled(self) -> bool:
@@ -85,4 +86,5 @@ def load_settings(path: Path | str | None = None, env: Mapping[str, str] | None 
         kamis_product_cls=str(pick("KAMIS_PRODUCT_CLS", "sources", "kamis", "product_cls", default="02")),
         garak_url=str(pick("GARAK_API_URL", "sources", "garak", "url", default="")),
         garak_api_key=str(pick("GARAK_API_KEY", "sources", "garak", "api_key", default="")),
+        decision=dict(data.get("decision", {})),
     )

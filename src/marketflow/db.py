@@ -32,6 +32,24 @@ SQLITE_DDL = [
         product_title TEXT NOT NULL, original_price INTEGER NOT NULL, sale_price INTEGER NOT NULL,
         normalized_unit_price NUMERIC NOT NULL, is_out_of_stock INTEGER DEFAULT 0, badge_info TEXT,
         extraction_source TEXT DEFAULT 'SELECTOR', region_code TEXT NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS int_operations_inventory (
+        internal_id INTEGER PRIMARY KEY AUTOINCREMENT, recorded_date TEXT NOT NULL, std_item_id INTEGER NOT NULL,
+        internal_sku TEXT NOT NULL, channel_name TEXT NOT NULL, purchase_cost NUMERIC NOT NULL,
+        fixed_cost NUMERIC NOT NULL, logistics_cost NUMERIC NOT NULL, channel_fee_rate NUMERIC NOT NULL,
+        promo_cost NUMERIC NOT NULL DEFAULT 0, vat_inclusive INTEGER NOT NULL DEFAULT 1,
+        pack_std_units NUMERIC NOT NULL DEFAULT 1, current_selling_price INTEGER NOT NULL,
+        stock_qty INTEGER NOT NULL, daily_sales_qty INTEGER NOT NULL, min_price_floor INTEGER NOT NULL,
+        lifecycle_metric TEXT NOT NULL, UNIQUE (recorded_date, internal_sku, channel_name))""",
+    "CREATE INDEX IF NOT EXISTS idx_inv_item_date ON int_operations_inventory (std_item_id, recorded_date)",
+    """CREATE TABLE IF NOT EXISTS price_recommendations (
+        rec_id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, std_item_id INTEGER NOT NULL,
+        channel_name TEXT NOT NULL, current_price INTEGER NOT NULL, suggested_price INTEGER NOT NULL,
+        reason_code TEXT NOT NULL, flags TEXT, status TEXT NOT NULL DEFAULT 'PENDING'
+          CHECK (status IN ('PENDING','APPROVED','REJECTED','APPLIED','SUPPRESSED','REVERTED')),
+        decided_by TEXT, decided_at TEXT)""",
+    """CREATE TABLE IF NOT EXISTS audit_log (
+        audit_id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL,
+        before_state TEXT, after_state TEXT)""",
     "CREATE INDEX IF NOT EXISTS idx_retail_item_time ON ext_retail_prices (std_item_id, scraped_at)",
     "CREATE INDEX IF NOT EXISTS idx_bench_item_date ON ext_public_benchmarks (std_item_id, recorded_date)",
 ]

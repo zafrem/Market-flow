@@ -21,3 +21,15 @@ product_cls = "02"     # "01" retail, "02" wholesale
 [sources.garak]        # Garak market endpoint (see src/marketflow/collectors/garak.py)
 url     = ""           # env: GARAK_API_URL
 api_key = ""           # env: GARAK_API_KEY
+
+# Pricing decision parameters (all optional; defaults shown). Per-category overrides: [decision.Fresh]
+[decision]
+# vat_rate = 0.10                  # KRW VAT
+# target_min_margin_pct = 0        # price floor = lowest price achieving this net margin (0 = break-even)
+# undercut_pct = 0                 # 0 = match lowest competitor; max 5
+# max_step_pct = 10                # max price move per run
+# cooldown_hours = 6
+# wholesale_rise_threshold_pct = 5 # no price cuts while wholesale rose more than this
+# round_to = 10                    # price tick (KRW)
+# flash_discount_pct = 10          # spoilage-risk markdown
+# alert_margin_pct = 10            # LOW_MARGIN flag at or below this net margin
