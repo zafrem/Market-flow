@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -20,6 +21,15 @@ def _dt(v: Any) -> datetime | None:
     if v is None or isinstance(v, datetime):
         return v
     return datetime.fromisoformat(str(v))
+
+
+@dataclass(frozen=True)
+class ReviewItem:
+    kind: str       # UNMATCHED_TITLE | UNPARSEABLE_TITLE | QUARANTINED_LISTING | UNMAPPED_BENCHMARK | UNCONVERTIBLE_BENCHMARK
+    source: str
+    key: str
+    reason: str
+    payload: dict[str, Any] = field(default_factory=dict)
 
 
 class OpsRepository:
@@ -154,3 +164,88 @@ class OpsRepository:
 
     def audit_entries(self) -> list[dict[str, Any]]:
         return self._rows("SELECT * FROM audit_log ORDER BY audit_id")
+
+
+class QueueMixin:
+    """Review queue, alert log and selector candidates (needs OpsRepository's _e/_rows/_b)."""
+
+    # ---- review queue ---------------------------------------------------------------------------
+    def add_review(self, items: list[ReviewItem], now: datetime) -> int:
+        """Insert items that are not already OPEN (same kind+source+key); returns how many were new."""
+        added = 0
+        for it in items:
+            if self._rows("SELECT 1 AS x FROM review_queue WHERE status='OPEN' AND kind=:k AND source=:s AND item_key=:i",
+                          k=it.kind, s=it.source, i=it.key[:255]):
+                continue
+            with self._e.begin() as c:
+                c.execute(text("INSERT INTO review_queue (created_at, kind, source, item_key, reason, payload) "
+                               "VALUES (:t,:k,:s,:i,:r,:p)"),
+                          self._b({"t": now, "k": it.kind, "s": it.source, "i": it.key[:255], "r": it.reason[:255],
+                                   "p": json.dumps(it.payload, ensure_ascii=False)}))
+            added += 1
+        return added
+
+    def list_review(self, status: str | None = "OPEN") -> list[dict[str, Any]]:
+        rows = self._rows("SELECT * FROM review_queue" + (" WHERE status=:s" if status else "") + " ORDER BY review_id",
+                          **({"s": status} if status else {}))
+        for r in rows:
+            r["payload"] = json.loads(r["payload"]) if isinstance(r["payload"], str) else (r["payload"] or {})
+        return rows
+
+    def resolve_review(self, review_id: int, actor: str, now: datetime) -> bool:
+        with self._e.begin() as c:
+            res = c.execute(text("UPDATE review_queue SET status='RESOLVED', resolved_by=:a, resolved_at=:t "
+                                 "WHERE review_id=:i AND status='OPEN'"), self._b({"a": actor, "t": now, "i": review_id}))
+            return res.rowcount == 1
+
+    # ---- alert log --------------------------------------------------------------------------------
+    def recently_sent(self, key: str, since: datetime) -> bool:
+        return bool(self._rows("SELECT 1 AS x FROM alert_log WHERE alert_key=:k AND status='SENT' AND created_at >= :s",
+                               k=key, s=since))
+
+    def log_alert(self, key: str, status: str, attempts: int, error: str | None, message: str, now: datetime) -> None:
+        with self._e.begin() as c:
+            c.execute(text("INSERT INTO alert_log (created_at, alert_key, status, attempts, last_error, message) "
+                           "VALUES (:t,:k,:s,:a,:e,:m)"),
+                      self._b({"t": now, "k": key, "s": status, "a": attempts, "e": (error or None), "m": message}))
+
+    def alert_entries(self) -> list[dict[str, Any]]:
+        return self._rows("SELECT * FROM alert_log ORDER BY alert_id")
+
+    # ---- selector candidates ------------------------------------------------------------------------
+    def add_candidate(self, platform: str, selectors: dict[str, Any], now: datetime) -> int | None:
+        blob = json.dumps(selectors, ensure_ascii=False, sort_keys=True)
+        if any(r["selectors"] == blob for r in self._rows(
+                "SELECT selectors FROM selector_candidates WHERE platform=:p AND status='PENDING'", p=platform)):
+            return None
+        with self._e.begin() as c:
+            return int(c.execute(text("INSERT INTO selector_candidates (created_at, platform, selectors) VALUES (:t,:p,:s)"),
+                                 self._b({"t": now, "p": platform, "s": blob})).lastrowid)
+
+    def list_candidates(self, status: str | None = "PENDING") -> list[dict[str, Any]]:
+        rows = self._rows("SELECT * FROM selector_candidates" + (" WHERE status=:s" if status else "") + " ORDER BY cand_id",
+                          **({"s": status} if status else {}))
+        for r in rows:
+            r["selectors"] = json.loads(r["selectors"]) if isinstance(r["selectors"], str) else r["selectors"]
+        return rows
+
+    def decide_candidate(self, cand_id: int, status: str, actor: str, now: datetime) -> bool:
+        with self._e.begin() as c:
+            res = c.execute(text("UPDATE selector_candidates SET status=:s, decided_by=:a, decided_at=:t "
+                                 "WHERE cand_id=:i AND status='PENDING'"), self._b({"s": status, "a": actor, "t": now, "i": cand_id}))
+            return res.rowcount == 1
+
+    # ---- competitor stock-out events -----------------------------------------------------------------------
+    def competitor_stockouts(self, since: datetime) -> list[dict[str, Any]]:
+        """Listings whose newest snapshot is out of stock while the previous one was in stock."""
+        rows = self._rows("SELECT r.platform, r.channel_item_code, r.product_title, r.is_out_of_stock, r.scraped_at, "
+                          "r.std_item_id, m.item_name FROM ext_retail_prices r JOIN master_products m ON m.std_item_id = r.std_item_id "
+                          "WHERE r.scraped_at >= :s ORDER BY r.scraped_at", s=since)
+        seq: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for r in rows:
+            seq.setdefault((r["platform"], r["channel_item_code"]), []).append(r)
+        return [s[-1] for s in seq.values() if len(s) >= 2 and s[-1]["is_out_of_stock"] and not s[-2]["is_out_of_stock"]]
+
+
+class Repo(OpsRepository, QueueMixin):
+    """Everything the worker needs."""

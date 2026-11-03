@@ -64,6 +64,18 @@ SQLITE_DDL = [
     """CREATE TABLE IF NOT EXISTS user_preferences (
         pref_id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL UNIQUE REFERENCES users (user_id),
         alert_margin_bep NUMERIC NOT NULL DEFAULT 10, ui_layout TEXT)""",
+    """CREATE TABLE IF NOT EXISTS review_queue (
+        review_id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, kind TEXT NOT NULL, source TEXT NOT NULL,
+        item_key TEXT NOT NULL, reason TEXT NOT NULL, payload TEXT, status TEXT NOT NULL DEFAULT 'OPEN'
+          CHECK (status IN ('OPEN','RESOLVED')), resolved_by TEXT, resolved_at TEXT)""",
+    "CREATE INDEX IF NOT EXISTS idx_review ON review_queue (status, kind, source, item_key)",
+    """CREATE TABLE IF NOT EXISTS alert_log (
+        alert_id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, alert_key TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('SENT','DEAD')), attempts INTEGER NOT NULL, last_error TEXT, message TEXT NOT NULL)""",
+    "CREATE INDEX IF NOT EXISTS idx_alert ON alert_log (alert_key, status, created_at)",
+    """CREATE TABLE IF NOT EXISTS selector_candidates (
+        cand_id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, platform TEXT NOT NULL, selectors TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','APPROVED','REJECTED')), decided_by TEXT, decided_at TEXT)""",
     "CREATE INDEX IF NOT EXISTS idx_retail_item_time ON ext_retail_prices (std_item_id, scraped_at)",
     "CREATE INDEX IF NOT EXISTS idx_bench_item_date ON ext_public_benchmarks (std_item_id, recorded_date)",
 ]

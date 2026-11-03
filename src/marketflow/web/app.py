@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy.engine import Engine
 
+from .. import curation
 from ..db import init_sqlite, make_engine
 from ..decision import service
 from ..decision.service import Actor, WorkflowError
@@ -194,6 +195,37 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
         except WorkflowError as e:
             raise HTTPException(409, str(e)) from e
         return {"rec_id": rec_id, "status": repo.get_recommendation(rec_id)["status"]}
+
+    # ---- curation (MD / ADMIN) ---------------------------------------------------------------------------------
+    def require_decider(user: CurrentUser = Depends(current_user)) -> CurrentUser:
+        if user.role not in service.DECIDERS:
+            raise HTTPException(403, "MD or admin only")
+        return user
+
+    def run_curation(fn, item_id: int, user: CurrentUser) -> dict[str, Any]:
+        try:
+            fn(repo, tp, item_id, Actor(user.email, user.role))
+        except PermissionError as e:
+            raise HTTPException(403, str(e)) from e
+        except WorkflowError as e:
+            raise HTTPException(409, str(e)) from e
+        return {"id": item_id, "ok": True}
+
+    @app.get("/review")
+    def review_items(_: CurrentUser = Depends(require_decider)):
+        return {"items": repo.list_review("OPEN")}
+
+    @app.post("/review/{review_id}/resolve")
+    def resolve(review_id: int, user: CurrentUser = Depends(require_decider)):
+        return run_curation(curation.resolve_review, review_id, user)
+
+    @app.get("/selectors")
+    def selector_candidates(_: CurrentUser = Depends(require_decider)):
+        return {"candidates": repo.list_candidates(None)}
+
+    @app.post("/selectors/{cand_id}/{action}")
+    def decide_selector(cand_id: int, action: Literal["approve", "reject"], user: CurrentUser = Depends(require_decider)):
+        return run_curation(curation.approve_selector if action == "approve" else curation.reject_selector, cand_id, user)
 
     # ---- admin --------------------------------------------------------------------------------------------------------
     @app.get("/admin/users")

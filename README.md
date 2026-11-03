@@ -70,3 +70,19 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"      # put the outp
   `POST /recommendations/{id}/approve|reject|apply|revert`; `/admin/users`, `/admin/audit` (ADMIN only).
 - **BUYER responses omit cost and margin keys entirely** (enforced server-side, covered by tests); out-of-scope resources return 404.
 - The dashboard keeps its token in memory only (a reload signs you out). Serve it behind HTTPS if exposed beyond localhost.
+
+## Running unattended (scheduler, alerts, review queue)
+
+```bash
+.venv/bin/python -m marketflow.worker      # benchmarks 06:00/09:00 · retail 08:00/13:00/19:00 · decisions +30 min (KST)
+```
+
+- **Alerts** go to `[alerts] webhook_url` (Slack-compatible): reverse-margin, spoilage, low margin, competitor stock-out,
+  failed jobs/collectors, escalated selector faults, new selector candidates. Each key is sent at most once per 6 h, retried
+  with backoff (1, 2, 4, 8 s), then dead-lettered in `alert_log`; at most 20 per run (the rest become one summary).
+  Scraped text is escaped so it cannot trigger `@channel`-style mentions. The alert text includes margin figures, so use a
+  channel only MD/ADMIN can read. Test it with `python -m marketflow.cli alert-test`.
+- **Review queue**: titles that could not be matched/parsed, quarantined LLM records and unmapped benchmark items are stored
+  (de-duplicated) instead of only logged. `cli review` / `resolve ID`, or `GET /review`, `POST /review/{id}/resolve`.
+- **Selector candidates**: when the LLM heals a page, the verified replacement selectors are saved as `PENDING`.
+  `cli selectors`, `approve-selector ID --as kim:MD` (or `POST /selectors/{id}/approve`) writes them to `config/overrides.json`.

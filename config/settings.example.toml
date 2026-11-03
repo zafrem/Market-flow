@@ -13,6 +13,10 @@ url = "sqlite:///data/marketflow.db"
 jwt_secret = ""        # env: JWT_SECRET
 token_ttl_minutes = 60 # env: TOKEN_TTL_MINUTES
 
+[alerts]
+# Slack-compatible incoming webhook (https). Alerts carry margin data: point it at a channel only MD/ADMIN can read.
+webhook_url = ""       # env: ALERT_WEBHOOK_URL
+
 [llm]
 mock = true            # env: MOCK_LLM. Set false to use Gemini for self-healing extraction.
 gemini_api_key = ""    # env: GEMINI_API_KEY  (https://aistudio.google.com)

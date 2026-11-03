@@ -5,6 +5,9 @@
   python -m marketflow.cli recs [--status PENDING]
   python -m marketflow.cli approve|reject|apply|revert ID --as NAME:ROLE      (ROLE: ADMIN | MD | BUYER)
   python -m marketflow.cli audit
+  python -m marketflow.cli review | resolve ID --as NAME:ROLE        (items the machine could not decide: unmatched/unparseable/quarantined)
+  python -m marketflow.cli selectors | approve-selector ID | reject-selector ID --as NAME:ROLE
+  python -m marketflow.cli alert-test                                 (sends a test message to alerts.webhook_url)
   python -m marketflow.cli add-user EMAIL NAME ADMIN|MD|BUYER     (prompts for password)
   python -m marketflow.cli assign EMAIL Fresh/Fruit [Fresh/Vegetable ...]
   python -m marketflow.web [--port 8000]                           (API + dashboard; needs auth.jwt_secret)
@@ -18,7 +21,8 @@ from datetime import date
 from .db import init_sqlite, make_engine
 from .decision import service
 from .erp import import_erp
-from .ops_repo import OpsRepository
+from . import curation
+from .ops_repo import Repo
 from .settings import Settings, load_settings
 from .time_provider import SystemTimeProvider, TimeProvider
 
@@ -34,6 +38,11 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
     for name in ("approve", "reject", "apply", "revert"):
         p = sub.add_parser(name); p.add_argument("rec_id", type=int); p.add_argument("--as", dest="actor", required=True, metavar="NAME:ROLE")
     sub.add_parser("audit")
+    sub.add_parser("review")
+    sub.add_parser("selectors")
+    sub.add_parser("alert-test")
+    for name in ("resolve", "approve-selector", "reject-selector"):
+        p = sub.add_parser(name); p.add_argument("id", type=int); p.add_argument("--as", dest="actor", required=True, metavar="NAME:ROLE")
     p = sub.add_parser("add-user"); p.add_argument("email"); p.add_argument("name"); p.add_argument("role", choices=["ADMIN", "MD", "BUYER"])
     p = sub.add_parser("assign"); p.add_argument("email"); p.add_argument("category", metavar="CATEGORY_L[/CATEGORY_M]", nargs="+")
     a = ap.parse_args(argv)
@@ -42,8 +51,35 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
     engine = make_engine(settings.database_url)
     if engine.dialect.name == "sqlite":
         init_sqlite(engine)
-    repo = OpsRepository(engine)
+    repo = Repo(engine)
 
+    if a.cmd == "review":
+        for r in repo.list_review("OPEN"):
+            print(f"#{r['review_id']} {r['kind']:<24} {r['source']:<8} {r['item_key']}  -- {r['reason']}", file=out)
+        return 0
+    if a.cmd == "selectors":
+        for c in repo.list_candidates(None):
+            print(f"#{c['cand_id']} {c['status']:<8} {c['platform']} item={c['selectors']['item']!r} "
+                  f"title={c['selectors']['fields']['title']['css']!r} sale_price={c['selectors']['fields']['sale_price']['css']!r}", file=out)
+        return 0
+    if a.cmd == "alert-test":
+        import asyncio
+        from .notify import Alert, Notifier
+        res = asyncio.run(Notifier(settings.alert_webhook_url, repo, tp).dispatch(
+            [Alert("TEST:" + tp.now().isoformat(), "INFO", "MarketFlow test alert")]))
+        print(f"sent={res.sent} dead={res.dead} no_webhook={res.skipped_no_webhook}", file=out)
+        return 0 if res.dead == 0 else 1
+    if a.cmd in {"resolve", "approve-selector", "reject-selector"}:
+        name, _, role = a.actor.partition(":")
+        fn = {"resolve": curation.resolve_review, "approve-selector": curation.approve_selector,
+              "reject-selector": curation.reject_selector}[a.cmd]
+        try:
+            fn(repo, tp, a.id, service.Actor(name, role.upper()))
+        except (PermissionError, service.WorkflowError) as e:
+            print(f"refused: {e}", file=out)
+            return 2
+        print(f"{a.cmd} #{a.id} ok", file=out)
+        return 0
     if a.cmd == "add-user":
         import getpass
         from .web.repo import AppRepository

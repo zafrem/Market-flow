@@ -205,6 +205,41 @@ CREATE TABLE IF NOT EXISTS price_recommendations (
   FOREIGN KEY (std_item_id) REFERENCES master_products (std_item_id)
 );
 
+CREATE TABLE IF NOT EXISTS review_queue (
+  review_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  created_at DATETIME NOT NULL,
+  kind VARCHAR(30) NOT NULL,
+  source VARCHAR(30) NOT NULL,
+  item_key VARCHAR(255) NOT NULL,
+  reason VARCHAR(255) NOT NULL,
+  payload JSON NULL,
+  status ENUM('OPEN','RESOLVED') NOT NULL DEFAULT 'OPEN',
+  resolved_by VARCHAR(100) NULL,
+  resolved_at DATETIME NULL,
+  KEY idx_review (status, kind, source, item_key(100))
+);
+
+CREATE TABLE IF NOT EXISTS alert_log (
+  alert_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  created_at DATETIME NOT NULL,
+  alert_key VARCHAR(255) NOT NULL,
+  status ENUM('SENT','DEAD') NOT NULL,
+  attempts INT NOT NULL,
+  last_error VARCHAR(255) NULL,
+  message TEXT NOT NULL,
+  KEY idx_alert (alert_key(100), status, created_at)
+);
+
+CREATE TABLE IF NOT EXISTS selector_candidates (
+  cand_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  created_at DATETIME NOT NULL,
+  platform VARCHAR(30) NOT NULL,
+  selectors JSON NOT NULL,
+  status ENUM('PENDING','APPROVED','REJECTED') NOT NULL DEFAULT 'PENDING',
+  decided_by VARCHAR(100) NULL,
+  decided_at DATETIME NULL
+);
+
 CREATE TABLE IF NOT EXISTS audit_log (
   audit_id BIGINT AUTO_INCREMENT PRIMARY KEY,
   ts DATETIME NOT NULL,

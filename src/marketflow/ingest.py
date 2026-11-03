@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass, field
 
 from .collectors.base import BenchmarkRecord, Collector
+from .ops_repo import ReviewItem
 from .repository import BenchmarkRepository
 from .units import UnitError, normalize_price
 
@@ -18,7 +19,7 @@ class IngestResult:
     unconvertible: list[str] = field(default_factory=list)  # unit can't map to standard_unit
 
 
-def ingest(records: list[BenchmarkRecord], repo: BenchmarkRepository, source_type: str) -> IngestResult:
+def ingest(records: list[BenchmarkRecord], repo: BenchmarkRepository, source_type: str, review=None, now=None) -> IngestResult:
     aliases = repo.load_aliases(source_type)
     res, rows = IngestResult(), []
     for r in records:
@@ -40,11 +41,14 @@ def ingest(records: list[BenchmarkRecord], repo: BenchmarkRepository, source_typ
             "extra_metrics": {**r.extra, "unit": r.unit_text},
         })
     res.stored = repo.upsert_benchmarks(rows)
+    if review and now is not None:
+        review([*(ReviewItem("UNMAPPED_BENCHMARK", source_type, n, "no master_product_aliases entry") for n in res.unmapped),
+                *(ReviewItem("UNCONVERTIBLE_BENCHMARK", source_type, n, "unit cannot convert to the item's standard unit") for n in res.unconvertible)], now)
     return res
 
 
-async def run_collector(collector: Collector, repo: BenchmarkRepository) -> IngestResult:
-    result = ingest(await collector.collect(), repo, collector.source_type)
+async def run_collector(collector: Collector, repo: BenchmarkRepository, review=None, now=None) -> IngestResult:
+    result = ingest(await collector.collect(), repo, collector.source_type, review, now)
     log.info("%s: stored=%d unmapped=%d unconvertible=%d", collector.source_type, result.stored,
              len(result.unmapped), len(result.unconvertible))
     return result

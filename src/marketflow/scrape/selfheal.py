@@ -116,8 +116,9 @@ def synthesize_selectors(html: str, current: dict[str, Any], items: list[dict[st
 
 class SelfHealingExtractor:
     def __init__(self, llm: LLMClient, last_price: Callable[[str, str], int | None] = lambda p, c: None,
-                 alert: Callable[[str], None] = lambda m: log.warning("ALERT %s", m)):
-        self._llm, self._last_price, self._alert = llm, last_price, alert
+                 alert: Callable[[str], None] = lambda m: log.warning("ALERT %s", m),
+                 on_candidate: Callable[[str, dict[str, Any]], None] | None = None):
+        self._llm, self._last_price, self._alert, self._on_candidate = llm, last_price, alert, on_candidate
         self._run_cache: dict[str, dict[str, Any]] = {}      # candidate selectors, this run only
         self.pending: dict[str, dict[str, Any]] = {}         # awaiting human approval
         self.consecutive_faults: dict[str, int] = {}
@@ -163,15 +164,21 @@ class SelfHealingExtractor:
         cand = synthesize_selectors(html, rule["selectors"], good, rules)
         if cand:
             self._run_cache[platform] = self.pending[platform] = cand
+            if self._on_candidate:
+                self._on_candidate(platform, cand)                       # persist so a person can approve it later
             self._alert(f"{platform}: new selectors proposed; approve to persist")
         return HealResult(good, "LLM", bad, candidate_pending=cand is not None)
 
     def approve(self, platform: str, actor: str) -> None:
-        """Human approval gate: persist the verified candidate into config/overrides.json."""
-        cand = self.pending.pop(platform)
-        store = default_store()
-        base = ["retail", platform, "selectors"]
-        store.promote(base + ["item"], cand["item"], actor)
-        for f in ("title", "sale_price"):
-            store.promote(base + ["fields", f], cand["fields"][f], actor)
+        """In-process approval gate (tests/REPL). Production approval goes through promote_candidate()."""
+        promote_candidate(platform, self.pending.pop(platform), actor)
         self._run_cache.pop(platform, None)
+
+
+def promote_candidate(platform: str, cand: dict[str, Any], actor: str) -> None:
+    """Persist a verified candidate into config/overrides.json (validated by RuleStore.promote)."""
+    store = default_store()
+    base = ["retail", platform, "selectors"]
+    store.promote(base + ["item"], cand["item"], actor)
+    for f in ("title", "sale_price"):
+        store.promote(base + ["fields", f], cand["fields"][f], actor)

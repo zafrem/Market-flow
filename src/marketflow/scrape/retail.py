@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Callable
 from decimal import Decimal
 from typing import Any
 
+from ..ops_repo import ReviewItem
 from ..repository import RetailRepository
 from ..rules import current_rules
 from ..time_provider import TimeProvider
@@ -36,6 +39,7 @@ class RetailResult:
     unmatched: list[str] = field(default_factory=list)       # no catalog match -> review queue
     unparseable: list[str] = field(default_factory=list)     # F-03-1 UNPARSEABLE -> review queue
     quarantined: int = 0
+    quarantined_detail: list[tuple[str, str]] = field(default_factory=list)   # (title, reason)
     candidate_pending: bool = False
 
 
@@ -45,7 +49,7 @@ def match_item(title: str, aliases: dict[str, tuple[int, str]]) -> tuple[int, st
 
 
 async def scrape_platform(platform: str, transport: Transport, tp: TimeProvider, extractor: SelfHealingExtractor,
-                          repo: RetailRepository) -> RetailResult:
+                          repo: RetailRepository, review: Callable[[list[ReviewItem], datetime], int] | None = None) -> RetailResult:
     rules = current_rules()
     rule = rules["retail"][platform]
     assert_cleared(platform, rule)
@@ -56,6 +60,7 @@ async def scrape_platform(platform: str, transport: Transport, tp: TimeProvider,
         healed = await extractor.extract(platform, await transport.get_text(url))
         res.source = healed.source if res.source == "SELECTOR" else res.source
         res.quarantined += len(healed.quarantined)
+        res.quarantined_detail += [(i.get("product_title") or str(i.get("channel_item_code")), why) for i, why in healed.quarantined]
         res.candidate_pending |= healed.candidate_pending
         rows = []
         for it in healed.listings:
@@ -78,6 +83,10 @@ async def scrape_platform(platform: str, transport: Transport, tp: TimeProvider,
                 "extraction_source": healed.source, "region_code": rule["region_code"],
             })
         res.stored += repo.insert_retail(rows)
+    if review:
+        review([*(ReviewItem("UNMATCHED_TITLE", platform, t, "no catalog item matches this title") for t in res.unmatched),
+                *(ReviewItem("UNPARSEABLE_TITLE", platform, t, "quantity/unit could not be determined") for t in res.unparseable),
+                *(ReviewItem("QUARANTINED_LISTING", platform, t, why) for t, why in res.quarantined_detail)], now)
     log.info("%s: stored=%d unmatched=%d unparseable=%d quarantined=%d source=%s", platform, res.stored,
              len(res.unmatched), len(res.unparseable), res.quarantined, res.source)
     return res

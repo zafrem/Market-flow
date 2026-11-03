@@ -10,7 +10,7 @@ from sqlalchemy import text
 
 from ..decision.calc import net_margin, q2
 from ..decision.config import load_decision_config
-from ..ops_repo import OpsRepository, _dec
+from ..ops_repo import Repo, _dec
 
 Scope = list[tuple[str, str]] | None      # None = unrestricted (ADMIN)
 
@@ -19,7 +19,7 @@ def in_scope(scope: Scope, category_l: str, category_m: str) -> bool:
     return scope is None or any(l == category_l and (m == "" or m == category_m) for l, m in scope)
 
 
-class AppRepository(OpsRepository):
+class AppRepository(Repo):
     # ---- users ---------------------------------------------------------------------------------
     def user_by_email(self, email: str) -> dict[str, Any] | None:
         r = self._rows("SELECT * FROM users WHERE email = :e", e=email.strip().lower())

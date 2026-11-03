@@ -1,7 +1,7 @@
 """Entrypoint.
 
   python -m marketflow.worker --once     run every enabled collector now, then exit
-  python -m marketflow.worker            run forever on the KST schedule (06:00, 09:00)
+  python -m marketflow.worker            run forever: benchmarks 06:00/09:00, retail 08:00/13:00/19:00, decisions +30min, alerts
   python -m marketflow.worker --retail   scrape configured retail platforms once (needs legal_review_ref)
   python -m marketflow.worker --check    show which sources are configured (tokens redacted)
 """
@@ -10,7 +10,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
-from datetime import time
+
+from datetime import timedelta
 
 from sqlalchemy.engine import Engine
 
@@ -23,15 +24,17 @@ from .rules import current_rules
 from .scrape.retail import ComplianceError, RetailResult, scrape_platform
 from .scrape.selfheal import SelfHealingExtractor
 from .ingest import IngestResult, run_collector
+from .decision import service
+from .notify import Alert, Notifier, alerts_from_recommendations, alerts_from_stockouts
+from .ops_repo import Repo
+from .scheduler import BENCHMARK_TIMES, DECIDE_TIMES, RETAIL_TIMES, Job, Scheduler
 from .partitions import ensure_partitions
 from .repository import SqlRepository
-from .schedule import next_run
 from .settings import Settings, load_settings
 from .time_provider import SystemTimeProvider, TimeProvider, today_kst
 from .transport import HttpTransport, Transport
 
 log = logging.getLogger("marketflow.worker")
-BENCHMARK_TIMES = [time(6, 0), time(9, 0)]  # F-01-1, KST
 
 
 def build_collectors(s: Settings, transport: Transport, tp: TimeProvider) -> list[Collector]:
@@ -56,11 +59,11 @@ def prepare_db(engine: Engine, tp: TimeProvider) -> None:
 
 async def run_jobs(engine: Engine, s: Settings, transport: Transport, tp: TimeProvider) -> dict[str, IngestResult | Exception]:
     prepare_db(engine, tp)
-    repo = SqlRepository(engine)
+    repo, queues = SqlRepository(engine), Repo(engine)
     results: dict[str, IngestResult | Exception] = {}
     for c in build_collectors(s, transport, tp):
         try:  # a failing source must not block the others
-            results[c.source_type] = await run_collector(c, repo)
+            results[c.source_type] = await run_collector(c, repo, queues.add_review, tp.now().replace(tzinfo=None))
         except Exception as e:
             log.exception("collector %s failed", c.source_type)
             results[c.source_type] = e
@@ -70,14 +73,16 @@ async def run_jobs(engine: Engine, s: Settings, transport: Transport, tp: TimePr
 async def run_retail(engine: Engine, transport: Transport, tp: TimeProvider, llm: LLMClient,
                      extractor: SelfHealingExtractor | None = None) -> dict[str, RetailResult | Exception]:
     prepare_db(engine, tp)
-    repo = SqlRepository(engine)
-    extractor = extractor or SelfHealingExtractor(llm, last_price=repo.last_retail_price)
+    repo, queues = SqlRepository(engine), Repo(engine)
+    extractor = extractor or SelfHealingExtractor(
+        llm, last_price=repo.last_retail_price,
+        on_candidate=lambda plat, cand: queues.add_candidate(plat, cand, tp.now().replace(tzinfo=None)))
     results: dict[str, RetailResult | Exception] = {}
     for platform, rule in current_rules().get("retail", {}).items():
         if not rule.get("urls"):
             continue
         try:
-            results[platform] = await scrape_platform(platform, transport, tp, extractor, repo)
+            results[platform] = await scrape_platform(platform, transport, tp, extractor, repo, queues.add_review)
         except ComplianceError as e:
             log.error("%s", e)
             results[platform] = e
@@ -85,6 +90,45 @@ async def run_retail(engine: Engine, transport: Transport, tp: TimeProvider, llm
             log.exception("retail %s failed", platform)
             results[platform] = e
     return results
+
+
+def build_scheduler(engine: Engine, s: Settings, transport: Transport, tp: TimeProvider, llm: LLMClient,
+                    notifier: Notifier, sleep=asyncio.sleep) -> Scheduler:
+    repo = Repo(engine)
+    faults: list[str] = []
+    extractor = SelfHealingExtractor(
+        llm, last_price=SqlRepository(engine).last_retail_price, alert=faults.append,
+        on_candidate=lambda plat, cand: repo.add_candidate(plat, cand, tp.now().replace(tzinfo=None)))
+
+    async def benchmarks() -> None:
+        for name, r in (await run_jobs(engine, s, transport, tp)).items():
+            if isinstance(r, Exception):
+                await notifier.dispatch([Alert(f"COLLECTOR_FAILED:{name}", "RED", f"Collector {name} failed ({type(r).__name__}).")])
+
+    async def retail() -> None:
+        faults.clear()
+        results = await run_retail(engine, transport, tp, llm, extractor)
+        alerts = [Alert(f"SELECTOR_FAULT:{m.split(':')[0]}", "RED", m) for m in faults if "ESCALATE" in m]
+        for plat, r in results.items():
+            if isinstance(r, Exception):
+                alerts.append(Alert(f"COLLECTOR_FAILED:{plat}", "RED", f"Retail scrape {plat} failed ({type(r).__name__})."))
+            elif r.candidate_pending:
+                alerts.append(Alert(f"SELECTOR_CANDIDATE:{plat}", "AMBER",
+                                    f"New selectors proposed for {plat}; review with `marketflow.cli selectors list`."))
+        await notifier.dispatch(alerts)
+
+    async def decide() -> None:
+        prepare_db(engine, tp)
+        created = service.run_decisions(repo, s, tp)
+        now = tp.now().replace(tzinfo=None)
+        await notifier.dispatch(alerts_from_recommendations(created)
+                                + alerts_from_stockouts(repo.competitor_stockouts(now - timedelta(hours=26))))
+
+    async def on_failure(job: Job, exc: Exception) -> None:
+        await notifier.dispatch([Alert(f"JOB_FAILED:{job.name}", "RED", f"Scheduled job '{job.name}' failed ({type(exc).__name__}).")])
+
+    return Scheduler([Job("benchmarks", BENCHMARK_TIMES, benchmarks), Job("retail", RETAIL_TIMES, retail),
+                      Job("decide", DECIDE_TIMES, decide)], tp, sleep=sleep, on_failure=on_failure)
 
 
 async def main(argv: list[str]) -> int:
@@ -108,12 +152,9 @@ async def main(argv: list[str]) -> int:
                 print(f"{name}: " + (f"FAILED {r!r}" if isinstance(r, Exception) else
                       f"stored={r.stored} unmapped={len(r.unmapped)} unconvertible={len(r.unconvertible)}"))
             return 1 if any(isinstance(r, Exception) for r in results.values()) else 0
-        while True:
-            when = next_run(tp.now(), BENCHMARK_TIMES)
-            delay = (when - tp.now()).total_seconds()
-            log.info("next run at %s (in %.0fs)", when.isoformat(), delay)
-            await asyncio.sleep(max(delay, 0))
-            await run_jobs(engine, settings, transport, tp)
+        prepare_db(engine, tp)
+        notifier = Notifier(settings.alert_webhook_url, Repo(engine), tp)
+        await build_scheduler(engine, settings, transport, tp, get_llm(settings), notifier).run_forever()
     finally:
         await transport.aclose()
 
