@@ -9,4 +9,4 @@ ALIASES: dict[str, str] = {  # Korean source name -> item_name
     "사과": "Apple", "배": "Pear", "양파": "Onion", "감자": "Potato",
     "배추": "Napa Cabbage", "무": "Radish", "대파": "Green Onion", "마늘": "Garlic",
 }
-SOURCES = ("KAMIS", "GARAK")
+SOURCES = ("KAMIS", "GARAK", "RETAIL")

@@ -2,6 +2,7 @@
 
   python -m marketflow.worker --once     run every enabled collector now, then exit
   python -m marketflow.worker            run forever on the KST schedule (06:00, 09:00)
+  python -m marketflow.worker --retail   scrape configured retail platforms once (needs legal_review_ref)
   python -m marketflow.worker --check    show which sources are configured (tokens redacted)
 """
 from __future__ import annotations
@@ -17,6 +18,10 @@ from .collectors.base import Collector
 from .collectors.garak import GarakCollector
 from .collectors.kamis import KamisCollector
 from .db import init_sqlite, make_engine
+from .llm import LLMClient, get_llm
+from .rules import current_rules
+from .scrape.retail import ComplianceError, RetailResult, scrape_platform
+from .scrape.selfheal import SelfHealingExtractor
 from .ingest import IngestResult, run_collector
 from .partitions import ensure_partitions
 from .repository import SqlRepository
@@ -62,6 +67,26 @@ async def run_jobs(engine: Engine, s: Settings, transport: Transport, tp: TimePr
     return results
 
 
+async def run_retail(engine: Engine, transport: Transport, tp: TimeProvider, llm: LLMClient,
+                     extractor: SelfHealingExtractor | None = None) -> dict[str, RetailResult | Exception]:
+    prepare_db(engine, tp)
+    repo = SqlRepository(engine)
+    extractor = extractor or SelfHealingExtractor(llm, last_price=repo.last_retail_price)
+    results: dict[str, RetailResult | Exception] = {}
+    for platform, rule in current_rules().get("retail", {}).items():
+        if not rule.get("urls"):
+            continue
+        try:
+            results[platform] = await scrape_platform(platform, transport, tp, extractor, repo)
+        except ComplianceError as e:
+            log.error("%s", e)
+            results[platform] = e
+        except Exception as e:      # one platform failing must not block the rest
+            log.exception("retail %s failed", platform)
+            results[platform] = e
+    return results
+
+
 async def main(argv: list[str]) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     settings = load_settings()
@@ -71,6 +96,12 @@ async def main(argv: list[str]) -> int:
         return 0
     tp, engine, transport = SystemTimeProvider(), make_engine(settings.database_url), HttpTransport()
     try:
+        if "--retail" in argv:
+            for name, r in (await run_retail(engine, transport, tp, get_llm(settings))).items():
+                print(f"{name}: " + (f"FAILED {r}" if isinstance(r, Exception) else
+                      f"stored={r.stored} source={r.source} unmatched={len(r.unmatched)} "
+                      f"unparseable={len(r.unparseable)} quarantined={r.quarantined} candidate_pending={r.candidate_pending}"))
+            return 0
         if "--once" in argv:
             results = await run_jobs(engine, settings, transport, tp)
             for name, r in results.items():

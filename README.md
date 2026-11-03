@@ -25,3 +25,17 @@ and approved fixes go to `config/overrides.json`.
 MARKETFLOW_LIVE=1 .venv/bin/pytest -m live -s      # real KAMIS/Garak calls using your configured tokens
 MARKETFLOW_TEST_DB_URL=mysql+pymysql://... .venv/bin/pytest -m mysql   # MySQL DDL/partition tests
 ```
+
+## Retail scraping & self-healing (Phase 2)
+
+Platform selectors live in `config/extraction.json` under `retail.<PLATFORM>`. A `SCRAPE` connector will not run until
+`legal_review_ref` is filled in (record the ToS/legal review) and `urls` is set.
+
+```bash
+.venv/bin/python -m marketflow.worker --retail     # scrape configured platforms once
+```
+
+When selectors stop matching, the page is sanitized and sent to the LLM (`llm.mock=false` + `gemini_api_key` in
+`settings.toml`; default is an offline mock). LLM records are validated and checked against the page text; verified
+replacement selectors are held as a *pending candidate* until a person calls `SelfHealingExtractor.approve(platform, actor)`,
+which writes them to `config/overrides.json`. Optional real-browser transport: `pip install -e '.[browser]' && playwright install chromium`.

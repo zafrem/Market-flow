@@ -9,7 +9,9 @@
 url = "sqlite:///data/marketflow.db"
 
 [llm]
-mock = true            # env: MOCK_LLM. Real Gemini arrives in Phase 2.
+mock = true            # env: MOCK_LLM. Set false to use Gemini for self-healing extraction.
+gemini_api_key = ""    # env: GEMINI_API_KEY  (https://aistudio.google.com)
+gemini_model = "gemini-2.5-flash"   # env: GEMINI_MODEL
 
 [sources.kamis]        # https://www.kamis.or.kr -> open API key + id
 api_key = ""           # env: KAMIS_API_KEY

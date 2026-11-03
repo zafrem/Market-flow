@@ -9,11 +9,13 @@ dependencies = [
   "PyMySQL>=1.1",
   "cryptography>=42",
   "tzdata",
+  "beautifulsoup4>=4.12",
   "tomli>=2; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+browser = ["playwright>=1.44"]   # optional: human-like Playwright transport (then: playwright install chromium)
 
 [build-system]
 requires = ["setuptools>=68"]

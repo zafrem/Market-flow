@@ -24,6 +24,8 @@ DEFAULT_DB_URL = "sqlite:///data/marketflow.db"
 class Settings:
     database_url: str = DEFAULT_DB_URL
     mock_llm: bool = True
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.5-flash"
     kamis_api_key: str = ""
     kamis_api_id: str = ""
     kamis_product_cls: str = "02"
@@ -43,7 +45,7 @@ class Settings:
             return "***" if v else "''"
         return (f"Settings(database_url={self.database_url!r}, mock_llm={self.mock_llm}, "
                 f"kamis_api_key={red(self.kamis_api_key)}, kamis_api_id={red(self.kamis_api_id)}, "
-                f"garak_url={self.garak_url!r}, garak_api_key={red(self.garak_api_key)})")
+                f"gemini_api_key={red(self.gemini_api_key)}, gemini_model={self.gemini_model!r}, garak_url={self.garak_url!r}, garak_api_key={red(self.garak_api_key)})")
 
 
 def _truthy(v: Any) -> bool:
@@ -76,6 +78,8 @@ def load_settings(path: Path | str | None = None, env: Mapping[str, str] | None 
     return Settings(
         database_url=str(pick("DATABASE_URL", "database", "url", default=DEFAULT_DB_URL)),
         mock_llm=_truthy(pick("MOCK_LLM", "llm", "mock", default=True)),
+        gemini_api_key=str(pick("GEMINI_API_KEY", "llm", "gemini_api_key", default="")),
+        gemini_model=str(pick("GEMINI_MODEL", "llm", "gemini_model", default="gemini-2.5-flash")),
         kamis_api_key=str(pick("KAMIS_API_KEY", "sources", "kamis", "api_key", default="")),
         kamis_api_id=str(pick("KAMIS_API_ID", "sources", "kamis", "api_id", default="")),
         kamis_product_cls=str(pick("KAMIS_PRODUCT_CLS", "sources", "kamis", "product_cls", default="02")),

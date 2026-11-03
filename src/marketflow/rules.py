@@ -57,6 +57,26 @@ def validate(rules: Rules) -> None:
             raise ValueError(f"source {name}: 'fields' and 'items_path' are required")
         if p := src.get("alias_strip_pattern"):
             re.compile(p)
+    _validate_retail(rules)
+
+
+def _validate_retail(rules: Rules) -> None:
+    from bs4 import BeautifulSoup
+    empty = BeautifulSoup("", "html.parser")
+    re.compile(rules["titles"]["quantity_pattern"].replace("{tokens}", "x"))
+    re.compile(rules["titles"]["multiplied_pattern"].replace("{tokens}", "x"))
+    for name, plat in rules.get("retail", {}).items():
+        sel = plat["selectors"]
+        for need in ("title", "sale_price"):
+            if need not in sel["fields"]:
+                raise ValueError(f"retail {name}: field {need!r} is required")
+        try:  # soupsieve raises on invalid CSS
+            empty.select(sel["item"])
+            for spec in sel["fields"].values():
+                if spec.get("css"):
+                    empty.select(spec["css"])
+        except Exception as e:
+            raise ValueError(f"retail {name}: invalid selector: {e}") from e
 
 
 def _sig(p: Path | None) -> tuple[int, int] | None:

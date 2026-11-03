@@ -26,6 +26,13 @@ SQLITE_DDL = [
         raw_item_name TEXT NOT NULL, avg_price NUMERIC NOT NULL, min_price NUMERIC NOT NULL,
         max_price NUMERIC NOT NULL, normalized_price NUMERIC NOT NULL, extra_metrics TEXT,
         UNIQUE (recorded_date, source_type, raw_item_name))""",
+    """CREATE TABLE IF NOT EXISTS ext_retail_prices (
+        retail_id INTEGER PRIMARY KEY AUTOINCREMENT, scraped_at TEXT NOT NULL, platform TEXT NOT NULL,
+        std_item_id INTEGER NOT NULL, match_confidence NUMERIC NOT NULL, channel_item_code TEXT NOT NULL,
+        product_title TEXT NOT NULL, original_price INTEGER NOT NULL, sale_price INTEGER NOT NULL,
+        normalized_unit_price NUMERIC NOT NULL, is_out_of_stock INTEGER DEFAULT 0, badge_info TEXT,
+        extraction_source TEXT DEFAULT 'SELECTOR', region_code TEXT NOT NULL)""",
+    "CREATE INDEX IF NOT EXISTS idx_retail_item_time ON ext_retail_prices (std_item_id, scraped_at)",
     "CREATE INDEX IF NOT EXISTS idx_bench_item_date ON ext_public_benchmarks (std_item_id, recorded_date)",
 ]
 

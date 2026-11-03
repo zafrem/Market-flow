@@ -135,7 +135,7 @@ def test_sqlite_bootstrap_is_idempotent_and_seeds_catalog(engine):
     init_sqlite(engine); init_sqlite(engine)
     with engine.connect() as c:
         assert c.execute(text("SELECT COUNT(*) FROM master_products")).scalar() == len(ITEMS)
-        assert c.execute(text("SELECT COUNT(*) FROM master_product_aliases")).scalar() == 2 * len(ALIASES)
+        assert c.execute(text("SELECT COUNT(*) FROM master_product_aliases")).scalar() == 3 * len(ALIASES)
 
 
 def test_python_seed_matches_mysql_seed_sql():

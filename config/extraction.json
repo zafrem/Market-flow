@@ -1,31 +1,127 @@
 {
   "common": {
-    "price_clean_pattern": "[,\\s]"
+    "price_clean_pattern": "[,\\s원₩]"
   },
   "units": {
     "pattern": "^\\s*([\\d,]*\\.?\\d+)?\\s*({tokens})\\s*$",
     "measure_tokens": {
-      "kg": ["g", 1000], "㎏": ["g", 1000], "킬로": ["g", 1000],
-      "g": ["g", 1], "그램": ["g", 1],
-      "l": ["ml", 1000], "ml": ["ml", 1]
+      "kg": [
+        "g",
+        1000
+      ],
+      "㎏": [
+        "g",
+        1000
+      ],
+      "킬로": [
+        "g",
+        1000
+      ],
+      "g": [
+        "g",
+        1
+      ],
+      "그램": [
+        "g",
+        1
+      ],
+      "l": [
+        "ml",
+        1000
+      ],
+      "ml": [
+        "ml",
+        1
+      ]
     },
-    "count_tokens": ["개", "ea", "unit", "마리", "포기", "단", "속", "구"]
+    "count_tokens": [
+      "개",
+      "ea",
+      "unit",
+      "마리",
+      "포기",
+      "단",
+      "속",
+      "구",
+      "롤",
+      "입",
+      "팩"
+    ]
   },
   "sources": {
     "KAMIS": {
       "parser": "marketflow.collectors.kamis:parse_kamis",
-      "items_path": ["data", "item"],
-      "status_path": ["data"],
-      "no_data_codes": ["001"],
+      "items_path": [
+        "data",
+        "item"
+      ],
+      "status_path": [
+        "data"
+      ],
+      "no_data_codes": [
+        "001"
+      ],
       "alias_strip_pattern": "/.*$",
-      "fields": {"name": "item_name", "kind": "kind_name", "rank": "rank", "unit": "unit", "price": "dpr1"}
+      "fields": {
+        "name": "item_name",
+        "kind": "kind_name",
+        "rank": "rank",
+        "unit": "unit",
+        "price": "dpr1"
+      }
     },
     "GARAK": {
       "parser": "marketflow.collectors.garak:parse_garak",
-      "items_path": ["items"],
+      "items_path": [
+        "items"
+      ],
       "fields": {
-        "name": "item", "kind": "kind", "grade": "grade", "unit": "unit",
-        "avg": "avg_price", "min": "min_price", "max": "max_price", "volume": "volume_kg"
+        "name": "item",
+        "kind": "kind",
+        "grade": "grade",
+        "unit": "unit",
+        "avg": "avg_price",
+        "min": "min_price",
+        "max": "max_price",
+        "volume": "volume_kg"
+      }
+    }
+  },
+  "titles": {
+    "quantity_pattern": "([\\d,]*\\.?\\d+)\\s*({tokens})(?![A-Za-z])",
+    "multiplied_pattern": "([\\d,]*\\.?\\d+)\\s*({tokens})\\s*[x×*]\\s*(\\d+)"
+  },
+  "retail": {
+    "SHOPA": {
+      "access_method": "SCRAPE",
+      "legal_review_ref": "",
+      "region_code": "SEOUL",
+      "max_deviation_pct": 50,
+      "urls": [],
+      "selectors": {
+        "item": "li.product-item",
+        "fields": {
+          "item_code": {
+            "css": "",
+            "attr": "data-id"
+          },
+          "title": {
+            "css": ".name"
+          },
+          "sale_price": {
+            "css": ".price .sale"
+          },
+          "original_price": {
+            "css": ".price .orig"
+          },
+          "out_of_stock": {
+            "css": ".soldout",
+            "exists": true
+          },
+          "badge": {
+            "css": ".badge"
+          }
+        }
       }
     }
   }
