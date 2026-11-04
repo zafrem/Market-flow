@@ -108,7 +108,7 @@ small { color: var(--ink-2); font-weight: 400; font-size: 12px; }
 .spark .dot { stroke: var(--surface); stroke-width: 2; }
 .spark .cross { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 2 2; }
 .nohist { color: var(--ink-2); font-size: 12px; width: 96px; text-align: center; flex: none; }
-.c-wholesale { --c: var(--s-wholesale); } .c-ours { --c: var(--s-ours); } .c-comp { --c: var(--s-comp); }
+.c-margin { --c: var(--ink-2); } .c-wholesale { --c: var(--s-wholesale); } .c-ours { --c: var(--s-ours); } .c-comp { --c: var(--s-comp); }
 .spark .line { stroke: var(--c); } .spark .dot { fill: var(--c); }
 .legend-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--c); }
 

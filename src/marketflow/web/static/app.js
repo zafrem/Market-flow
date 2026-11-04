@@ -19,12 +19,12 @@ const parsePoints = (series) => (series || []).map(([d, v]) => ({ d, t: Date.par
 const tip = () => document.querySelector("#tip");
 
 // Direction of change over the window, as words and an arrow (never colour alone, and never red/green: up is not "bad").
-function change(points) {
+function change(points, points_unit = false) {
   if (points.length < 2) return "";
   const a = points[0].v, b = points[points.length - 1].v, days = Math.round((points[points.length - 1].t - points[0].t) / DAY_MS);
-  const pct = a ? (b - a) / a * 100 : 0;
-  const arrow = Math.abs(pct) < 0.05 ? "▬" : pct > 0 ? "▲" : "▼";
-  return arrow + " " + Math.abs(pct).toFixed(1) + "% over " + days + "d";
+  const d = points_unit ? b - a : (a ? (b - a) / a * 100 : 0);                       // margins change in percentage points, prices in %
+  const arrow = Math.abs(d) < 0.05 ? "▬" : d > 0 ? "▲" : "▼";
+  return arrow + " " + Math.abs(d).toFixed(1) + (points_unit ? " pt" : "%") + " over " + days + "d";
 }
 
 function sparkline(series, cls, name, fmt) {
@@ -55,10 +55,10 @@ function sparkline(series, cls, name, fmt) {
 }
 
 // value (+ context line) on the left, its own chart on the right; each measure has its own scale
-function trendCell(value, series, cls, name, fmt, extra) {
-  const td = el("td", "", "num"), box = el("div", "", "trend"), val = el("div", "", "val");
+function trendCell(value, series, cls, name, fmt, extra, tdClass = "num", pointsUnit = false) {
+  const td = el("td", "", tdClass), box = el("div", "", "trend"), val = el("div", "", "val");
   val.append(el("b", value));
-  const pts = parsePoints(series); const delta = change(pts);
+  const pts = parsePoints(series); const delta = change(pts, pointsUnit);
   if (delta) val.append(el("small", delta));
   if (extra) val.append(el("small", extra));
   box.append(val, sparkline(series, cls, name, fmt)); td.append(box);
@@ -123,10 +123,10 @@ async function loadMatrix() {
   for (const r of rows) {
     const tr = el("tr"), t = r.trend || {};
     const name = el("td"); name.append(el("span", r.item_name, "item"), el("small", r.category_l + " / " + r.category_m + " · " + r.internal_sku));
-    const margin = el("td", "", "num cost margin"); margin.hidden = me.role === "BUYER";
+    let margin = el("td", "", "num cost margin"); margin.hidden = me.role === "BUYER";
     if (r.internal.margin_rate !== undefined) {
       const low = Number(r.internal.margin_rate) <= 10;
-      margin.textContent = (low ? "⚠ " : "✓ ") + r.internal.margin_rate + "%"; margin.classList.add(low ? "red" : "green");
+      margin = trendCell((low ? "⚠ " : "✓ ") + r.internal.margin_rate + "%", r.internal.margin_trend, "c-margin", "Margin %", (v) => v.toFixed(2) + "%", "", "num cost margin " + (low ? "red" : "green"), true);
     }
     const bench = trendCell(r.public_benchmark ? won(r.public_benchmark.normalized_price) : "–", t.wholesale, "c-wholesale", "Wholesale", decimals);
     const ours = trendCell(won(r.internal.current_selling_price), t.ours, "c-ours", "Our price", won);

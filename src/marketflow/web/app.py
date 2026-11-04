@@ -23,7 +23,7 @@ from .security import LoginThrottle, MIN_PASSWORD_LEN, MIN_SECRET_LEN, burn_veri
 
 STATIC = Path(__file__).parent / "static"
 COST_KEYS = {"purchase_cost", "fixed_cost", "logistics_cost", "channel_fee_rate", "promo_cost", "min_price_floor",
-             "margin_amount", "margin_rate"}
+             "margin_amount", "margin_rate", "margin_trend"}
 Role = Literal["ADMIN", "MD", "BUYER"]
 
 

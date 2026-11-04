@@ -138,7 +138,8 @@ class AppRepository(Repo):
                 "internal": {"current_selling_price": r["current_selling_price"], "purchase_cost": str(cost["purchase_cost"]),
                              "fixed_cost": str(cost["fixed_cost"]), "logistics_cost": str(cost["logistics_cost"]),
                              "channel_fee_rate": str(cost["channel_fee_rate"]), "promo_cost": str(cost["promo_cost"]),
-                             "min_price_floor": r["min_price_floor"], "margin_amount": str(amt), "margin_rate": str(rate)},
+                             "min_price_floor": r["min_price_floor"], "margin_amount": str(amt), "margin_rate": str(rate),
+                             "margin_trend": self._margin_trend(r, cfg)},
                 "trend": self._trend(r, cfg, pack),
                 "competitors": {"listings": len(comps), "out_of_stock": sum(c["is_out_of_stock"] for c in comps),
                                 "lowest_unit_price": str(q2(min(live))) if live else None,
@@ -169,6 +170,19 @@ class AppRepository(Repo):
         return {"wholesale": [[str(x["d"]), str(q2(_dec(x["v"])))] for x in wholesale],
                 "ours": [[str(x["d"]), str(int(x["v"]))] for x in ours],
                 "competitor": [[d, str(q2(v))] for d, v in sorted(per_day.items())]}
+
+    def _margin_trend(self, r: dict[str, Any], cfg) -> list[list[str]]:
+        """Net margin % per inventory day (that day's price and costs). COST DATA: it is listed in COST_KEYS so BUYERs never get it."""
+        last = r["recorded_date"] if isinstance(r["recorded_date"], date) else date.fromisoformat(str(r["recorded_date"])[:10])
+        out = []
+        for x in self._rows("SELECT recorded_date, current_selling_price, purchase_cost, fixed_cost, logistics_cost, channel_fee_rate, promo_cost, "
+                            "vat_inclusive FROM int_operations_inventory WHERE internal_sku = :k AND channel_name = :c AND "
+                            "recorded_date >= :s AND recorded_date <= :e ORDER BY recorded_date",
+                            k=r["internal_sku"], c=r["channel_name"], s=last - timedelta(days=TREND_DAYS - 1), e=last):
+            _, rate = net_margin(x["current_selling_price"], _dec(x["purchase_cost"]), _dec(x["fixed_cost"]), _dec(x["logistics_cost"]),
+                                 _dec(x["promo_cost"]), _dec(x["channel_fee_rate"]), bool(x["vat_inclusive"]), cfg.vat_rate)
+            out.append([str(x["recorded_date"]), str(rate)])
+        return out
 
     def recommendations_view(self, scope: Scope, status: str | None = None) -> list[dict[str, Any]]:
         sql = ("SELECT p.*, m.item_name, m.category_l, m.category_m FROM price_recommendations p "

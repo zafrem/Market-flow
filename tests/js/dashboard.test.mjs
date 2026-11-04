@@ -15,7 +15,7 @@ const ROW = (name, internal) => ({ std_item_id: 1, item_name: name, category_l: 
   trend: { wholesale: [["2026-10-21", "500.00"], ["2026-10-28", "510.00"], ["2026-11-03", "523.00"]],
            ours: [["2026-10-21", "10400"], ["2026-11-03", "10000"]],
            competitor: [["2026-11-03", "8400.00"]] } });
-const FULL = { current_selling_price: 10000, margin_rate: "15.85" };
+const FULL = { current_selling_price: 10000, margin_rate: "15.85", margin_trend: [["2026-10-21", "14.10"], ["2026-11-03", "15.85"]] };
 
 function boot({ role = "MD", routes = {} } = {}) {
   const calls = [];
@@ -215,7 +215,7 @@ const firstRow = (t) => t.d.querySelectorAll("#matrix-table tbody tr")[0];
 test("each measure gets its own sparkline with a text equivalent and a change summary", async () => {
   const t = boot(); await t.login();
   const sparks = firstRow(t).querySelectorAll("svg.spark");
-  assert.equal(sparks.length, 2);                                                  // competitor has one point -> no chart, a plain note
+  assert.equal(sparks.length, 3);                                                  // wholesale, our price, margin; competitor has one point -> a plain note
   assert.match(sparks[0].getAttribute("aria-label"), /^Wholesale, last 3 days: 2026-10-21 500, 2026-10-28 510, 2026-11-03 523$/);
   assert.match(sparks[1].getAttribute("aria-label"), /^Our price, last 2 days: 2026-10-21 10,400, 2026-11-03 10,000$/);
   const small = [...firstRow(t).querySelectorAll(".val small")].map(text);
@@ -247,7 +247,7 @@ test("a flat or missing history degrades gracefully", async () => {
   assert.match(d, /M5\.0 16\.0 L91\.0 16\.0/);                                      // no range -> mid-height line, no NaN
   assert.equal([...firstRow(t).querySelectorAll(".nohist")].map(text).join("|"), "No history|No history");
   assert.ok(!firstRow(t).textContent.includes("NaN"));
-  const old = boot({ routes: { "GET /matrix": () => [200, { rows: [{ ...ROW("Apple", FULL), trend: undefined }] }] } }); await old.login();
+  const old = boot({ routes: { "GET /matrix": () => [200, { rows: [{ ...ROW("Apple", { ...FULL, margin_trend: undefined }), trend: undefined }] }] } }); await old.login();
   assert.equal(firstRow(old).querySelectorAll("svg.spark").length, 0);                 // an older server without trends still renders
 });
 
@@ -266,4 +266,15 @@ test("empty states say what to do next", async () => {
   assert.match(text(t.d.querySelector("#recs-table tbody")), /No recommendations yet/);
   assert.match(text(t.d.querySelector("#review-table tbody")), /Nothing to review/);
   assert.equal(t.d.querySelector('nav button[data-tab="recs"] .badge'), null);
+});
+
+
+test("margin gets its own chart, in percentage points, for MD but not BUYER", async () => {
+  const t = boot(); await t.login();
+  const cell = firstRow(t).children[4];
+  assert.match(cell.querySelector("svg.spark").getAttribute("aria-label"), /^Margin %, last 2 days: 2026-10-21 14\.10%, 2026-11-03 15\.85%$/);
+  assert.ok([...cell.querySelectorAll(".val small")].map(text).includes("▲ 1.8 pt over 13d"));
+  assert.equal(cell.classList.contains("green"), true);
+  const b = boot({ role: "BUYER" }); await b.login();
+  assert.equal(firstRow(b).children[4].hidden, true); assert.equal(firstRow(b).children[4].querySelectorAll("svg").length, 0);
 });

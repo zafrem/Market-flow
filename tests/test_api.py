@@ -340,3 +340,19 @@ def test_matrix_rows_carry_a_trend_for_every_role_without_cost_data(world):
         assert [p[0] for p in t["wholesale"]] == ["2026-11-01", "2026-11-03"] and t["wholesale"][0][1] == "500.00"   # 2025 row is outside the 14-day window
         assert len(t["competitor"]) == 1 and t["competitor"][0][1] == "8400.00"        # 700 per unit x 12-unit pack
     assert keys_anywhere(world.client.get("/matrix", headers=login(world, "buyer")).json(), COST_KEYS) == set()
+
+
+def test_margin_trend_is_cost_data_md_gets_it_buyer_does_not(world):
+    with world.e.begin() as c:
+        c.execute(text("INSERT INTO int_operations_inventory (recorded_date, std_item_id, internal_sku, channel_name, purchase_cost, fixed_cost, "
+                       "logistics_cost, channel_fee_rate, promo_cost, vat_inclusive, pack_std_units, current_selling_price, stock_qty, daily_sales_qty, "
+                       "min_price_floor, lifecycle_metric) SELECT '2026-11-02', std_item_id, internal_sku, channel_name, purchase_cost, fixed_cost, logistics_cost, "
+                       "channel_fee_rate, promo_cost, vat_inclusive, pack_std_units, 11000, stock_qty, daily_sales_qty, min_price_floor, lifecycle_metric "
+                       "FROM int_operations_inventory WHERE internal_sku = 'APPLE-1' AND recorded_date = '2026-11-03'"))
+    md = next(r for r in world.client.get("/matrix", headers=login(world, "md_fruit")).json()["rows"] if r["item_name"] == "Apple")
+    series = md["internal"]["margin_trend"]
+    assert [p[0] for p in series] == ["2026-11-02", "2026-11-03"]
+    assert float(series[0][1]) > float(series[1][1])                       # a higher price the day before -> a higher margin
+    assert series[1][1] == md["internal"]["margin_rate"]                   # the latest point is the current margin
+    buyer = world.client.get("/matrix", headers=login(world, "buyer")).json()
+    assert "margin_trend" not in str(buyer)
