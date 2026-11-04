@@ -11,7 +11,10 @@ const settle = async () => { for (let i = 0; i < 6; i++) await new Promise((r) =
 
 const ROW = (name, internal) => ({ std_item_id: 1, item_name: name, category_l: "Fresh", category_m: "Fruit", internal_sku: "APPLE-1", channel_name: "SHOPA",
   stock_qty: 100, remaining_days: 2, public_benchmark: { normalized_price: "523.00" }, internal,
-  competitors: { listings: 2, out_of_stock: 1, lowest_pack_price: "8400.00" } });
+  competitors: { listings: 2, out_of_stock: 1, lowest_pack_price: "8400.00" },
+  trend: { wholesale: [["2026-10-21", "500.00"], ["2026-10-28", "510.00"], ["2026-11-03", "523.00"]],
+           ours: [["2026-10-21", "10400"], ["2026-11-03", "10000"]],
+           competitor: [["2026-11-03", "8400.00"]] } });
 const FULL = { current_selling_price: 10000, margin_rate: "15.85" };
 
 function boot({ role = "MD", routes = {} } = {}) {
@@ -56,8 +59,9 @@ test("MD login shows the matrix with cost column and colored margin", async () =
   assert.equal(t.d.querySelector("#app").hidden, false);
   assert.match(text(t.d.querySelector("#who")), /Kim · MD/);
   const cells = [...t.d.querySelectorAll("#matrix-table tbody tr")[0].children].map(text);
-  assert.match(cells[0], /^Apple/); assert.equal(cells[2], "523"); assert.equal(cells[3], "10,000");
-  assert.equal(cells[4], "15.85%"); assert.match(cells[5], /8,400/); assert.match(cells[5], /1\/2 out of stock/); assert.match(cells[6], /D-2/);
+  const fig = (i) => text(t.d.querySelectorAll("#matrix-table tbody tr")[0].children[i].querySelector(".val b"));
+  assert.match(cells[0], /^Apple/); assert.equal(fig(2), "523"); assert.equal(fig(3), "10,000");
+  assert.match(cells[4], /15\.85%/); assert.match(cells[5], /8,400/); assert.match(cells[5], /1\/2 out of stock/); assert.match(cells[6], /D-2/);
   assert.ok(t.d.querySelector("#matrix-table tbody td.green"));
   assert.equal(t.d.querySelector("th.cost").hidden, false);
 });
@@ -103,7 +107,7 @@ test("recommendation actions depend on status and post to the right URL", async 
   const rows = [...t.d.querySelectorAll("#recs-table tbody tr")];
   assert.deepEqual([...rows[0].querySelectorAll("button")].map(text), ["approve", "reject"]);
   assert.deepEqual([...rows[1].querySelectorAll("button")].map(text), ["revert"]);
-  assert.match(text(rows[0].children[6]), /REVERSE MARGIN WARNING/);
+  assert.match(text(rows[0].children[6]), /Reverse margin warning/);
   await t.click(rows[0].querySelector("button"));
   const post = t.calls.find((c) => c.method === "POST" && c.path === "/recommendations/1/approve");
   assert.ok(post && post.auth === "Bearer tok123");
@@ -203,4 +207,63 @@ test("export button downloads applied changes as CSV, with formula defusing", as
 test("BUYER does not see the export button", async () => {
   const t = boot({ role: "BUYER" }); await t.login();
   assert.equal(t.d.querySelector("#export-applied").closest(".decider").hidden, true);
+});
+
+
+const firstRow = (t) => t.d.querySelectorAll("#matrix-table tbody tr")[0];
+
+test("each measure gets its own sparkline with a text equivalent and a change summary", async () => {
+  const t = boot(); await t.login();
+  const sparks = firstRow(t).querySelectorAll("svg.spark");
+  assert.equal(sparks.length, 2);                                                  // competitor has one point -> no chart, a plain note
+  assert.match(sparks[0].getAttribute("aria-label"), /^Wholesale, last 3 days: 2026-10-21 500, 2026-10-28 510, 2026-11-03 523$/);
+  assert.match(sparks[1].getAttribute("aria-label"), /^Our price, last 2 days: 2026-10-21 10,400, 2026-11-03 10,000$/);
+  const small = [...firstRow(t).querySelectorAll(".val small")].map(text);
+  assert.ok(small.includes("▲ 4.6% over 13d") && small.includes("▼ 3.8% over 13d"), small.join(" | "));   // words + arrow, not colour alone
+  assert.equal(text(firstRow(t).querySelector(".nohist")), "1 day of data");
+  assert.ok(sparks[0].querySelector("path.line").getAttribute("d").startsWith("M5.0 "));        // starts at the left padding
+  assert.equal(sparks[0].querySelectorAll("circle.dot").length, 2);                              // end marker + (hidden) hover marker
+});
+
+test("hovering a chart shows that day's value in the shared tooltip and leaving hides it", async () => {
+  const t = boot(); await t.login();
+  const svg = firstRow(t).querySelector("svg.spark"), tip = t.d.querySelector("#tip");
+  svg.getBoundingClientRect = () => ({ left: 100, width: 96, top: 0, height: 32 });
+  assert.equal(tip.hidden, true);
+  svg.dispatchEvent(new t.w.MouseEvent("pointermove", { clientX: 100, clientY: 80, bubbles: true }));    // far left -> first day
+  assert.equal(tip.hidden, false);
+  assert.match(text(tip), /500/); assert.match(text(tip), /Wholesale · 2026-10-21/);
+  assert.equal(svg.querySelector("line.cross").hasAttribute("hidden"), false);
+  svg.dispatchEvent(new t.w.MouseEvent("pointermove", { clientX: 196, clientY: 80, bubbles: true }));    // far right -> last day
+  assert.match(text(tip), /523/);
+  svg.dispatchEvent(new t.w.MouseEvent("pointerleave", { bubbles: true }));
+  assert.equal(tip.hidden, true); assert.equal(svg.querySelector("line.cross").hasAttribute("hidden"), true);
+});
+
+test("a flat or missing history degrades gracefully", async () => {
+  const flat = { ...ROW("Apple", FULL), trend: { wholesale: [["2026-11-02", "5.00"], ["2026-11-03", "5.00"]], ours: [], competitor: [] } };
+  const t = boot({ routes: { "GET /matrix": () => [200, { rows: [flat] }] } }); await t.login();
+  const d = firstRow(t).querySelector("svg.spark path.line").getAttribute("d");
+  assert.match(d, /M5\.0 16\.0 L91\.0 16\.0/);                                      // no range -> mid-height line, no NaN
+  assert.equal([...firstRow(t).querySelectorAll(".nohist")].map(text).join("|"), "No history|No history");
+  assert.ok(!firstRow(t).textContent.includes("NaN"));
+  const old = boot({ routes: { "GET /matrix": () => [200, { rows: [{ ...ROW("Apple", FULL), trend: undefined }] }] } }); await old.login();
+  assert.equal(firstRow(old).querySelectorAll("svg.spark").length, 0);                 // an older server without trends still renders
+});
+
+test("summary strip and tab badges reflect the data", async () => {
+  const t = boot(); await t.login();
+  const figs = [...t.d.querySelectorAll("#summary .fig")].map((f) => text(f.querySelector("b")) + " " + text(f.querySelector("span")));
+  assert.deepEqual(figs, ["1 items tracked", "1 priced above the lowest competitor", "1 competitor listings out of stock", "1 recommendations awaiting a decision"]);
+  assert.equal(text(t.d.querySelector('nav button[data-tab="recs"] .badge')), "1");
+  assert.equal(text(t.d.querySelector('nav button[data-tab="review"] .badge')), "1");
+});
+
+test("empty states say what to do next", async () => {
+  const t = boot({ routes: { "GET /matrix": () => [200, { rows: [] }], "GET /recommendations": () => [200, { recommendations: [] }], "GET /review": () => [200, { items: [] }] } });
+  await t.login();
+  assert.match(text(t.d.querySelector("#matrix-table tbody")), /No items yet\. Import inventory/);
+  assert.match(text(t.d.querySelector("#recs-table tbody")), /No recommendations yet/);
+  assert.match(text(t.d.querySelector("#review-table tbody")), /Nothing to review/);
+  assert.equal(t.d.querySelector('nav button[data-tab="recs"] .badge'), null);
 });

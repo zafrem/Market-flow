@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -10,8 +10,9 @@ from sqlalchemy import text
 
 from ..decision.calc import net_margin, q2
 from ..decision.config import load_decision_config
-from ..ops_repo import Repo, _dec
+from ..ops_repo import Repo, _dec, _dt
 
+TREND_DAYS = 14
 Scope = list[tuple[str, str]] | None      # None = unrestricted (ADMIN)
 
 
@@ -138,11 +139,36 @@ class AppRepository(Repo):
                              "fixed_cost": str(cost["fixed_cost"]), "logistics_cost": str(cost["logistics_cost"]),
                              "channel_fee_rate": str(cost["channel_fee_rate"]), "promo_cost": str(cost["promo_cost"]),
                              "min_price_floor": r["min_price_floor"], "margin_amount": str(amt), "margin_rate": str(rate)},
+                "trend": self._trend(r, cfg, pack),
                 "competitors": {"listings": len(comps), "out_of_stock": sum(c["is_out_of_stock"] for c in comps),
                                 "lowest_unit_price": str(q2(min(live))) if live else None,
                                 "lowest_pack_price": str(q2(min(live) * pack)) if live else None},
             })
         return out
+
+    def _trend(self, r: dict[str, Any], cfg, pack: Decimal) -> dict[str, list[list[str]]]:
+        """Daily series for the last TREND_DAYS days ending at the item's latest inventory date; days without data are
+        simply absent. Wholesale and competitor values are per standard unit / per pack as in the matrix columns.
+        Contains no cost data, so it is safe for every role."""
+        last = r["recorded_date"] if isinstance(r["recorded_date"], date) else date.fromisoformat(str(r["recorded_date"])[:10])
+        since = last - timedelta(days=TREND_DAYS - 1)
+        wholesale = self._rows("SELECT recorded_date AS d, AVG(normalized_price) AS v FROM ext_public_benchmarks "
+                               "WHERE std_item_id = :i AND recorded_date >= :s AND recorded_date <= :e "
+                               "GROUP BY recorded_date ORDER BY recorded_date", i=r["std_item_id"], s=since, e=last)
+        ours = self._rows("SELECT recorded_date AS d, current_selling_price AS v FROM int_operations_inventory "
+                          "WHERE internal_sku = :k AND channel_name = :c AND recorded_date >= :s AND recorded_date <= :e "
+                          "ORDER BY recorded_date", k=r["internal_sku"], c=r["channel_name"], s=since, e=last)
+        per_day: dict[str, Decimal] = {}
+        for c in self._rows("SELECT scraped_at, normalized_unit_price, match_confidence FROM ext_retail_prices "
+                            "WHERE std_item_id = :i AND is_out_of_stock = 0 AND scraped_at >= :s AND scraped_at < :e",
+                            i=r["std_item_id"], s=datetime.combine(since, time.min), e=datetime.combine(last + timedelta(days=1), time.min)):
+            if _dec(c["match_confidence"]) < cfg.min_match_confidence:
+                continue
+            day, price = str(_dt(c["scraped_at"]).date()), _dec(c["normalized_unit_price"]) * pack
+            per_day[day] = min(price, per_day.get(day, price))
+        return {"wholesale": [[str(x["d"]), str(q2(_dec(x["v"])))] for x in wholesale],
+                "ours": [[str(x["d"]), str(int(x["v"]))] for x in ours],
+                "competitor": [[d, str(q2(v))] for d, v in sorted(per_day.items())]}
 
     def recommendations_view(self, scope: Scope, status: str | None = None) -> list[dict[str, Any]]:
         sql = ("SELECT p.*, m.item_name, m.category_l, m.category_m FROM price_recommendations p "

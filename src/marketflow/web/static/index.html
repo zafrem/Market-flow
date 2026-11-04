@@ -7,7 +7,13 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header><h1>MarketFlow</h1><div id="who"></div></header>
+  <header>
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path class="tag" d="M3 5a2 2 0 0 1 2-2h11.2a2 2 0 0 1 1.4.6l11.8 11.8a2 2 0 0 1 0 2.8l-9.8 9.8a2 2 0 0 1-2.8 0L3.6 16.2A2 2 0 0 1 3 14.8z"/><circle class="hole" cx="10" cy="10" r="2.4"/><polyline class="stroke" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" points="11,21 15,17 18,19.5 23,14"/></svg>
+      <h1>MarketFlow</h1>
+    </div>
+    <div id="who"></div>
+  </header>
   <main>
     <section id="login">
       <form id="login-form">
@@ -18,27 +24,36 @@
       </form>
     </section>
     <section id="app" hidden>
+      <div id="summary" class="summary" aria-label="Summary"></div>
       <nav><button data-tab="matrix" class="active">Comparison matrix</button><button data-tab="recs">Recommendations</button><button data-tab="review" class="decider">Review queue</button><button data-tab="selectors" class="decider">Selector candidates</button></nav>
       <p id="toast" role="status"></p>
       <div id="matrix">
-        <label class="inline"><input type="checkbox" id="only-watch"> Watchlist only</label>
-        <table id="matrix-table"><thead><tr>
-          <th>Item</th><th>Channel</th><th>Wholesale<br><small>per std unit</small></th><th>Our price</th>
-          <th class="cost">Margin</th><th>Lowest competitor<br><small>pack price</small></th><th>Stock</th><th>Watch</th>
-        </tr></thead><tbody></tbody></table>
+        <div class="toolbar">
+          <label class="inline"><input type="checkbox" id="only-watch"> Watchlist only</label>
+          <p class="hint">Charts show the last 14 days. Hover a chart for daily values.</p>
+        </div>
+        <div class="scroll"><table id="matrix-table"><thead><tr>
+          <th>Item</th><th>Channel</th>
+          <th class="r"><span class="legend-dot c-wholesale"></span>Wholesale<br><small>per standard unit</small></th>
+          <th class="r"><span class="legend-dot c-ours"></span>Our price</th>
+          <th class="cost r">Margin</th>
+          <th class="r"><span class="legend-dot c-comp"></span>Lowest competitor<br><small>pack price</small></th>
+          <th class="r">Stock</th><th>Watch</th>
+        </tr></thead><tbody></tbody></table></div>
       </div>
       <div id="recs" hidden>
         <p class="decider"><button id="export-applied">Export applied prices (CSV)</button></p>
-        <table id="recs-table"><thead><tr><th>#</th><th>Item</th><th>Channel</th><th>Current</th><th>Suggested</th><th>Reason</th><th>Flags</th><th>Status</th><th></th></tr></thead><tbody></tbody></table>
+        <div class="scroll"><table id="recs-table"><thead><tr><th>#</th><th>Item</th><th>Channel</th><th class="r">Current</th><th class="r">Suggested</th><th>Reason</th><th>Flags</th><th>Status</th><th></th></tr></thead><tbody></tbody></table></div>
       </div>
       <div id="review" hidden>
-        <table id="review-table"><thead><tr><th>#</th><th>Kind</th><th>Source</th><th>Item</th><th>Reason</th><th></th></tr></thead><tbody></tbody></table>
+        <div class="scroll"><table id="review-table"><thead><tr><th>#</th><th>Kind</th><th>Source</th><th>Item</th><th>Reason</th><th></th></tr></thead><tbody></tbody></table></div>
       </div>
       <div id="selectors" hidden>
-        <table id="selectors-table"><thead><tr><th>#</th><th>Platform</th><th>Status</th><th>Item</th><th>Title</th><th>Price</th><th></th></tr></thead><tbody></tbody></table>
+        <div class="scroll"><table id="selectors-table"><thead><tr><th>#</th><th>Platform</th><th>Status</th><th>Item</th><th>Title</th><th>Price</th><th></th></tr></thead><tbody></tbody></table></div>
       </div>
     </section>
   </main>
+  <div id="tip" role="tooltip" hidden></div>
   <script src="/static/app.js"></script>
 </body>
 </html>

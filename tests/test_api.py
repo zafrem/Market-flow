@@ -321,3 +321,22 @@ def test_login_throttle_limits_and_memory():
     for i in range(500):
         t.fail(f"r{i}@x", f"c{i}", t0)
     assert len(t._hits) <= 50                                              # bounded under a random-email flood
+
+
+def test_matrix_rows_carry_a_trend_for_every_role_without_cost_data(world):
+    with world.e.begin() as c:                                             # add history: two earlier inventory days + benchmarks + a competitor snapshot
+        for day, price in (("2026-11-01", 10400), ("2026-11-02", 10200)):
+            c.execute(text("INSERT INTO int_operations_inventory (recorded_date, std_item_id, internal_sku, channel_name, purchase_cost, fixed_cost, "
+                           "logistics_cost, channel_fee_rate, promo_cost, vat_inclusive, pack_std_units, current_selling_price, stock_qty, daily_sales_qty, "
+                           "min_price_floor, lifecycle_metric) SELECT :d, std_item_id, internal_sku, channel_name, purchase_cost, fixed_cost, logistics_cost, "
+                           "channel_fee_rate, promo_cost, vat_inclusive, pack_std_units, :p, stock_qty, daily_sales_qty, min_price_floor, lifecycle_metric "
+                           "FROM int_operations_inventory WHERE internal_sku = 'APPLE-1' AND recorded_date = '2026-11-03'"), {"d": day, "p": price})
+        c.execute(text("INSERT INTO ext_public_benchmarks (recorded_date,source_type,std_item_id,raw_item_name,avg_price,min_price,max_price,normalized_price,extra_metrics) "
+                       "VALUES ('2026-11-01','KAMIS',1,'사과/후지',50000,50000,50000,500,'{}'), ('2025-01-01','KAMIS',1,'사과/후지',1,1,1,1,'{}')"))
+    for who in ("md_fruit", "buyer"):
+        row = next(r for r in world.client.get("/matrix", headers=login(world, who)).json()["rows"] if r["item_name"] == "Apple")
+        t = row["trend"]
+        assert [p[0] for p in t["ours"]] == ["2026-11-01", "2026-11-02", "2026-11-03"] and t["ours"][0][1] == "10400"
+        assert [p[0] for p in t["wholesale"]] == ["2026-11-01", "2026-11-03"] and t["wholesale"][0][1] == "500.00"   # 2025 row is outside the 14-day window
+        assert len(t["competitor"]) == 1 and t["competitor"][0][1] == "8400.00"        # 700 per unit x 12-unit pack
+    assert keys_anywhere(world.client.get("/matrix", headers=login(world, "buyer")).json(), COST_KEYS) == set()
