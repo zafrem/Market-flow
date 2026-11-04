@@ -65,9 +65,12 @@ def test_partition_pruning(engine, table, col, lo, hi):
 
 
 def test_ensure_partitions_extends_and_is_idempotent(engine):
-    first = ensure_partitions(engine, date(2027, 6, 15), ahead=3)
-    assert first["ext_retail_prices"] == ["p202707", "p202708", "p202709"]
-    assert all(v == [] for v in ensure_partitions(engine, date(2027, 6, 15), ahead=3).values())
+    ensure_partitions(engine, date(2027, 6, 15), ahead=3)        # adds whatever is missing (nothing on a re-run of this test)
+    with engine.connect() as c:
+        have = set(c.execute(text("SELECT partition_name FROM information_schema.partitions WHERE table_schema = DATABASE() "
+                                  "AND table_name = 'ext_retail_prices' AND partition_name IS NOT NULL")).scalars())
+    assert {"p202707", "p202708", "p202709", "pmax"} <= have
+    assert all(v == [] for v in ensure_partitions(engine, date(2027, 6, 15), ahead=3).values())     # idempotent
     with engine.begin() as c:   # pmax still catches rows, and new month prunes correctly
         c.execute(text("INSERT INTO ext_public_benchmarks (recorded_date,source_type,std_item_id,raw_item_name,"
                        "avg_price,min_price,max_price,normalized_price) VALUES ('2027-08-02','T',1,'x',1,1,1,1)"))

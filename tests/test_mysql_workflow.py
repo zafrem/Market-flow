@@ -94,7 +94,13 @@ def test_api_login_matrix_and_recommendations(env):
     tok = c.post("/auth/login", json={"email": "md@x.com", "password": "pw-long-enough-1"}).json()["access_token"]
     h = {"Authorization": f"Bearer {tok}"}
     assert c.get("/auth/me", headers=h).json()["role"] == "MD"
-    assert len(c.get("/matrix", headers=h).json()["rows"]) == 2
+    rows = c.get("/matrix", headers=h).json()["rows"]
+    assert len(rows) == 2
+    apple = next(r for r in rows if r["item_name"] == "Apple")            # history queries (IN list + GROUP BY) on real MySQL
+    assert apple["trend"]["ours"] == [["2026-11-03", "10000"]]
+    assert apple["trend"]["competitor"] == [["2026-11-03", "8400.00"]]    # 700 per unit x 12-unit pack
+    assert apple["internal"]["margin_trend"] == [["2026-11-03", apple["internal"]["margin_rate"]]]
+    assert apple["trend"]["wholesale"] == []                              # no benchmark loaded for this fixture
     recs = c.get("/recommendations", headers=h).json()["recommendations"]
     assert recs and all(isinstance(r["flags"], dict) for r in recs)
     assert c.post(f"/recommendations/{recs[0]['rec_id']}/approve", headers=h).status_code == 200
