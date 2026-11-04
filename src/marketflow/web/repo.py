@@ -10,7 +10,7 @@ from sqlalchemy import text
 
 from ..decision.calc import net_margin, q2
 from ..decision.config import load_decision_config
-from ..ops_repo import Repo, _dec, _dt
+from ..ops_repo import Repo, _dec, _dt, newest_per_listing
 
 TREND_DAYS = 14
 def _as_date(v: Any) -> date:
@@ -119,16 +119,16 @@ class AppRepository(Repo):
             "(SELECT MAX(x.recorded_date) FROM int_operations_inventory x WHERE x.internal_sku = i.internal_sku "
             "AND x.channel_name = i.channel_name) ORDER BY m.item_name, i.internal_sku, i.channel_name")
         rows = [r for r in rows if in_scope(scope, r["category_l"], r["category_m"]) and (item_ids is None or r["std_item_id"] in item_ids)]
-        history = self._history(rows)                                  # one query per table, however many items
+        history = self._history(rows, now, settings)                                 # one query per table, however many items
         out = []
         for r in rows:
             cfg = load_decision_config(settings.decision, r["category_l"])
             cost = {k: _dec(r[k]) for k in ("purchase_cost", "fixed_cost", "logistics_cost", "channel_fee_rate", "promo_cost")}
             amt, rate = net_margin(r["current_selling_price"], cost["purchase_cost"], cost["fixed_cost"], cost["logistics_cost"],
                                    cost["promo_cost"], cost["channel_fee_rate"], bool(r["vat_inclusive"]), cfg.vat_rate)
-            bench = self._rows("SELECT recorded_date, AVG(normalized_price) AS p FROM ext_public_benchmarks WHERE std_item_id = :i "
-                               "GROUP BY recorded_date ORDER BY recorded_date DESC LIMIT 1", i=r["std_item_id"])
-            comps = self.competitor_snapshots(r["std_item_id"], now - timedelta(hours=float(cfg.competitor_max_age_hours)))
+            bench = history["latest_bench"].get(int(r["std_item_id"]))
+            since = now - timedelta(hours=float(cfg.competitor_max_age_hours))
+            comps = newest_per_listing([c for c in history["listings"].get(int(r["std_item_id"]), []) if c["scraped_at"] >= since])
             comps = [c for c in comps if c["match_confidence"] >= cfg.min_match_confidence]
             live = [c["normalized_unit_price"] for c in comps if not c["is_out_of_stock"]]
             pack = _dec(r["pack_std_units"])
@@ -137,8 +137,8 @@ class AppRepository(Repo):
                 "std_item_id": r["std_item_id"], "item_name": r["item_name"], "category_l": r["category_l"],
                 "category_m": r["category_m"], "internal_sku": r["internal_sku"], "channel_name": r["channel_name"],
                 "recorded_date": str(r["recorded_date"]), "stock_qty": r["stock_qty"], "remaining_days": life.get("remaining_days"),
-                "public_benchmark": ({"recorded_date": str(bench[0]["recorded_date"]), "unit": r["standard_unit"],
-                                      "normalized_price": str(q2(_dec(bench[0]["p"])))} if bench else None),
+                "public_benchmark": ({"recorded_date": str(bench[0]), "unit": r["standard_unit"],
+                                      "normalized_price": str(q2(bench[1]))} if bench else None),
                 "internal": {"current_selling_price": r["current_selling_price"], "purchase_cost": str(cost["purchase_cost"]),
                              "fixed_cost": str(cost["fixed_cost"]), "logistics_cost": str(cost["logistics_cost"]),
                              "channel_fee_rate": str(cost["channel_fee_rate"]), "promo_cost": str(cost["promo_cost"]),
@@ -155,10 +155,10 @@ class AppRepository(Repo):
     def _last_day(r: dict[str, Any]) -> date:
         return r["recorded_date"] if isinstance(r["recorded_date"], date) else date.fromisoformat(str(r["recorded_date"])[:10])
 
-    def _history(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    def _history(self, rows: list[dict[str, Any]], now: datetime, settings=None) -> dict[str, Any]:
         """Everything the trend charts need for these matrix rows, fetched once (ids are ints, so inlining them is safe)."""
         if not rows:
-            return {"bench": {}, "inv": {}, "retail": {}}
+            return {"bench": {}, "inv": {}, "retail": {}, "latest_bench": {}, "listings": {}}
         ids = ",".join(str(i) for i in sorted({int(r["std_item_id"]) for r in rows}))
         first = min(self._last_day(r) for r in rows) - timedelta(days=TREND_DAYS - 1)
         last = max(self._last_day(r) for r in rows)
@@ -177,7 +177,18 @@ class AppRepository(Repo):
                             "AND is_out_of_stock = 0 AND scraped_at >= :s AND scraped_at < :e",
                             s=datetime.combine(first, time.min), e=datetime.combine(last + timedelta(days=1), time.min)):
             retail.setdefault(int(x["std_item_id"]), []).append(x)
-        return {"bench": bench, "inv": inv, "retail": retail}
+        latest_bench = {int(x["std_item_id"]): (x["recorded_date"], _dec(x["v"])) for x in self._rows(
+            f"SELECT b.std_item_id, b.recorded_date, AVG(b.normalized_price) AS v FROM ext_public_benchmarks b WHERE b.std_item_id IN ({ids}) "
+            "AND b.recorded_date = (SELECT MAX(m.recorded_date) FROM ext_public_benchmarks m WHERE m.std_item_id = b.std_item_id) "
+            "GROUP BY b.std_item_id, b.recorded_date")}
+        oldest = now - timedelta(hours=max(float(load_decision_config(settings.decision, c).competitor_max_age_hours)
+                                           for c in {r["category_l"] for r in rows}))
+        listings: dict[int, list[dict[str, Any]]] = {}
+        for x in self._rows(f"SELECT std_item_id, platform, channel_item_code, normalized_unit_price, is_out_of_stock, match_confidence, "
+                            f"scraped_at FROM ext_retail_prices WHERE std_item_id IN ({ids}) AND scraped_at >= :since", since=oldest):
+            x["scraped_at"] = _dt(x["scraped_at"])
+            listings.setdefault(int(x["std_item_id"]), []).append(x)
+        return {"bench": bench, "inv": inv, "retail": retail, "latest_bench": latest_bench, "listings": listings}
 
     def _trend(self, r: dict[str, Any], cfg, pack: Decimal, h: dict[str, Any]) -> dict[str, list[list[str]]]:
         """Daily series for the last TREND_DAYS days ending at the item's latest inventory date; days without data are

@@ -370,3 +370,26 @@ def test_trend_history_is_fetched_once_per_table_not_once_per_row(world):
     finally:
         event.remove(world.e, "before_cursor_execute", spy)
     assert len(rows) == 2 and sorted(seen) == ["ext_public_benchmarks", "ext_retail_prices", "int_operations_inventory"]
+
+
+def test_matrix_runs_a_fixed_number_of_queries_regardless_of_item_count(world):
+    from sqlalchemy import event
+    def count():
+        n = []
+        def spy(conn, cursor, statement, *a):
+            if "ext_" in statement or "int_operations_inventory" in statement:
+                n.append(statement)
+        event.listen(world.e, "before_cursor_execute", spy)
+        try:
+            world.client.get("/matrix", headers=login(world, "admin"))
+        finally:
+            event.remove(world.e, "before_cursor_execute", spy)
+        return len(n)
+    base = count()
+    with world.e.begin() as c:       # a third inventory row for the same item (another channel)
+        c.execute(text("INSERT INTO int_operations_inventory (recorded_date, std_item_id, internal_sku, channel_name, purchase_cost, fixed_cost, "
+                       "logistics_cost, channel_fee_rate, promo_cost, vat_inclusive, pack_std_units, current_selling_price, stock_qty, daily_sales_qty, "
+                       "min_price_floor, lifecycle_metric) SELECT recorded_date, std_item_id, internal_sku, 'OtherChannel', purchase_cost, fixed_cost, "
+                       "logistics_cost, channel_fee_rate, promo_cost, vat_inclusive, pack_std_units, current_selling_price, stock_qty, daily_sales_qty, "
+                       "min_price_floor, lifecycle_metric FROM int_operations_inventory WHERE internal_sku = 'APPLE-1'"))
+    assert count() == base

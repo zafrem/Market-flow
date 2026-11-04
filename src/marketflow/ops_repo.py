@@ -120,12 +120,7 @@ class OpsRepository:
         if region:
             sql += " AND region_code = :r"
             params["r"] = region
-        latest: dict[tuple[str, str], dict[str, Any]] = {}
-        for r in sorted(self._rows(sql, **params), key=lambda r: str(r["scraped_at"])):
-            r["scraped_at"], r["match_confidence"] = _dt(r["scraped_at"]), _dec(r["match_confidence"])
-            r["normalized_unit_price"], r["is_out_of_stock"] = _dec(r["normalized_unit_price"]), bool(r["is_out_of_stock"])
-            latest[(r["platform"], r["channel_item_code"])] = r
-        return list(latest.values())
+        return newest_per_listing(self._rows(sql, **params))
 
     def wholesale_change_pct(self, std_item_id: int) -> Decimal | None:
         """Mean normalized benchmark price: newest recorded_date vs the one before it."""
@@ -277,3 +272,13 @@ class QueueMixin:
 
 class Repo(OpsRepository, QueueMixin):
     """Everything the worker needs."""
+
+
+def newest_per_listing(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Newest snapshot per (platform, channel_item_code), with typed fields."""
+    latest: dict[tuple[str, str], dict[str, Any]] = {}
+    for r in sorted(rows, key=lambda r: str(r["scraped_at"])):
+        r["scraped_at"], r["match_confidence"] = _dt(r["scraped_at"]), _dec(r["match_confidence"])
+        r["normalized_unit_price"], r["is_out_of_stock"] = _dec(r["normalized_unit_price"]), bool(r["is_out_of_stock"])
+        latest[(r["platform"], r["channel_item_code"])] = r
+    return list(latest.values())
