@@ -356,3 +356,17 @@ def test_margin_trend_is_cost_data_md_gets_it_buyer_does_not(world):
     assert series[1][1] == md["internal"]["margin_rate"]                   # the latest point is the current margin
     buyer = world.client.get("/matrix", headers=login(world, "buyer")).json()
     assert "margin_trend" not in str(buyer)
+
+
+def test_trend_history_is_fetched_once_per_table_not_once_per_row(world):
+    from sqlalchemy import event
+    seen = []
+    def spy(conn, cursor, statement, *a):
+        if "AND recorded_date >= " in statement or "AND scraped_at < " in statement:      # the history queries (they have an upper bound)
+            seen.append(statement.split("FROM")[1].split()[0])
+    event.listen(world.e, "before_cursor_execute", spy)
+    try:
+        rows = world.client.get("/matrix", headers=login(world, "admin")).json()["rows"]
+    finally:
+        event.remove(world.e, "before_cursor_execute", spy)
+    assert len(rows) == 2 and sorted(seen) == ["ext_public_benchmarks", "ext_retail_prices", "int_operations_inventory"]

@@ -13,6 +13,10 @@ from ..decision.config import load_decision_config
 from ..ops_repo import Repo, _dec, _dt
 
 TREND_DAYS = 14
+def _as_date(v: Any) -> date:
+    return v if isinstance(v, date) and not isinstance(v, datetime) else date.fromisoformat(str(v)[:10])
+
+
 Scope = list[tuple[str, str]] | None      # None = unrestricted (ADMIN)
 
 
@@ -114,10 +118,10 @@ class AppRepository(Repo):
             "JOIN master_products m ON m.std_item_id = i.std_item_id WHERE i.recorded_date = "
             "(SELECT MAX(x.recorded_date) FROM int_operations_inventory x WHERE x.internal_sku = i.internal_sku "
             "AND x.channel_name = i.channel_name) ORDER BY m.item_name, i.internal_sku, i.channel_name")
+        rows = [r for r in rows if in_scope(scope, r["category_l"], r["category_m"]) and (item_ids is None or r["std_item_id"] in item_ids)]
+        history = self._history(rows)                                  # one query per table, however many items
         out = []
         for r in rows:
-            if not in_scope(scope, r["category_l"], r["category_m"]) or (item_ids is not None and r["std_item_id"] not in item_ids):
-                continue
             cfg = load_decision_config(settings.decision, r["category_l"])
             cost = {k: _dec(r[k]) for k in ("purchase_cost", "fixed_cost", "logistics_cost", "channel_fee_rate", "promo_cost")}
             amt, rate = net_margin(r["current_selling_price"], cost["purchase_cost"], cost["fixed_cost"], cost["logistics_cost"],
@@ -139,46 +143,68 @@ class AppRepository(Repo):
                              "fixed_cost": str(cost["fixed_cost"]), "logistics_cost": str(cost["logistics_cost"]),
                              "channel_fee_rate": str(cost["channel_fee_rate"]), "promo_cost": str(cost["promo_cost"]),
                              "min_price_floor": r["min_price_floor"], "margin_amount": str(amt), "margin_rate": str(rate),
-                             "margin_trend": self._margin_trend(r, cfg)},
-                "trend": self._trend(r, cfg, pack),
+                             "margin_trend": self._margin_trend(r, cfg, history)},
+                "trend": self._trend(r, cfg, pack, history),
                 "competitors": {"listings": len(comps), "out_of_stock": sum(c["is_out_of_stock"] for c in comps),
                                 "lowest_unit_price": str(q2(min(live))) if live else None,
                                 "lowest_pack_price": str(q2(min(live) * pack)) if live else None},
             })
         return out
 
-    def _trend(self, r: dict[str, Any], cfg, pack: Decimal) -> dict[str, list[list[str]]]:
+    @staticmethod
+    def _last_day(r: dict[str, Any]) -> date:
+        return r["recorded_date"] if isinstance(r["recorded_date"], date) else date.fromisoformat(str(r["recorded_date"])[:10])
+
+    def _history(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        """Everything the trend charts need for these matrix rows, fetched once (ids are ints, so inlining them is safe)."""
+        if not rows:
+            return {"bench": {}, "inv": {}, "retail": {}}
+        ids = ",".join(str(i) for i in sorted({int(r["std_item_id"]) for r in rows}))
+        first = min(self._last_day(r) for r in rows) - timedelta(days=TREND_DAYS - 1)
+        last = max(self._last_day(r) for r in rows)
+        bench: dict[int, list[tuple[date, Decimal]]] = {}
+        for x in self._rows(f"SELECT std_item_id, recorded_date, AVG(normalized_price) AS v FROM ext_public_benchmarks WHERE std_item_id IN ({ids}) "
+                            "AND recorded_date >= :s AND recorded_date <= :e GROUP BY std_item_id, recorded_date ORDER BY recorded_date", s=first, e=last):
+            bench.setdefault(int(x["std_item_id"]), []).append((_as_date(x["recorded_date"]), _dec(x["v"])))
+        inv: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for x in self._rows(f"SELECT recorded_date, internal_sku, channel_name, current_selling_price, purchase_cost, fixed_cost, logistics_cost, "
+                            f"channel_fee_rate, promo_cost, vat_inclusive FROM int_operations_inventory WHERE std_item_id IN ({ids}) "
+                            "AND recorded_date >= :s AND recorded_date <= :e ORDER BY recorded_date", s=first, e=last):
+            x["recorded_date"] = _as_date(x["recorded_date"])
+            inv.setdefault((x["internal_sku"], x["channel_name"]), []).append(x)
+        retail: dict[int, list[dict[str, Any]]] = {}
+        for x in self._rows(f"SELECT std_item_id, scraped_at, normalized_unit_price, match_confidence FROM ext_retail_prices WHERE std_item_id IN ({ids}) "
+                            "AND is_out_of_stock = 0 AND scraped_at >= :s AND scraped_at < :e",
+                            s=datetime.combine(first, time.min), e=datetime.combine(last + timedelta(days=1), time.min)):
+            retail.setdefault(int(x["std_item_id"]), []).append(x)
+        return {"bench": bench, "inv": inv, "retail": retail}
+
+    def _trend(self, r: dict[str, Any], cfg, pack: Decimal, h: dict[str, Any]) -> dict[str, list[list[str]]]:
         """Daily series for the last TREND_DAYS days ending at the item's latest inventory date; days without data are
         simply absent. Wholesale and competitor values are per standard unit / per pack as in the matrix columns.
         Contains no cost data, so it is safe for every role."""
-        last = r["recorded_date"] if isinstance(r["recorded_date"], date) else date.fromisoformat(str(r["recorded_date"])[:10])
+        last = self._last_day(r)
         since = last - timedelta(days=TREND_DAYS - 1)
-        wholesale = self._rows("SELECT recorded_date AS d, AVG(normalized_price) AS v FROM ext_public_benchmarks "
-                               "WHERE std_item_id = :i AND recorded_date >= :s AND recorded_date <= :e "
-                               "GROUP BY recorded_date ORDER BY recorded_date", i=r["std_item_id"], s=since, e=last)
-        ours = self._rows("SELECT recorded_date AS d, current_selling_price AS v FROM int_operations_inventory "
-                          "WHERE internal_sku = :k AND channel_name = :c AND recorded_date >= :s AND recorded_date <= :e "
-                          "ORDER BY recorded_date", k=r["internal_sku"], c=r["channel_name"], s=since, e=last)
+        wholesale = [[str(d), str(q2(v))] for d, v in h["bench"].get(int(r["std_item_id"]), []) if since <= d <= last]
+        ours = [[str(x["recorded_date"]), str(int(x["current_selling_price"]))]
+                for x in h["inv"].get((r["internal_sku"], r["channel_name"]), []) if since <= x["recorded_date"] <= last]
         per_day: dict[str, Decimal] = {}
-        for c in self._rows("SELECT scraped_at, normalized_unit_price, match_confidence FROM ext_retail_prices "
-                            "WHERE std_item_id = :i AND is_out_of_stock = 0 AND scraped_at >= :s AND scraped_at < :e",
-                            i=r["std_item_id"], s=datetime.combine(since, time.min), e=datetime.combine(last + timedelta(days=1), time.min)):
-            if _dec(c["match_confidence"]) < cfg.min_match_confidence:
+        for c in h["retail"].get(int(r["std_item_id"]), []):
+            at = _dt(c["scraped_at"])
+            if not (since <= at.date() <= last) or _dec(c["match_confidence"]) < cfg.min_match_confidence:
                 continue
-            day, price = str(_dt(c["scraped_at"]).date()), _dec(c["normalized_unit_price"]) * pack
+            day, price = str(at.date()), _dec(c["normalized_unit_price"]) * pack
             per_day[day] = min(price, per_day.get(day, price))
-        return {"wholesale": [[str(x["d"]), str(q2(_dec(x["v"])))] for x in wholesale],
-                "ours": [[str(x["d"]), str(int(x["v"]))] for x in ours],
-                "competitor": [[d, str(q2(v))] for d, v in sorted(per_day.items())]}
+        return {"wholesale": wholesale, "ours": ours, "competitor": [[d, str(q2(v))] for d, v in sorted(per_day.items())]}
 
-    def _margin_trend(self, r: dict[str, Any], cfg) -> list[list[str]]:
+    def _margin_trend(self, r: dict[str, Any], cfg, h: dict[str, Any]) -> list[list[str]]:
         """Net margin % per inventory day (that day's price and costs). COST DATA: it is listed in COST_KEYS so BUYERs never get it."""
-        last = r["recorded_date"] if isinstance(r["recorded_date"], date) else date.fromisoformat(str(r["recorded_date"])[:10])
+        last = self._last_day(r)
+        since = last - timedelta(days=TREND_DAYS - 1)
         out = []
-        for x in self._rows("SELECT recorded_date, current_selling_price, purchase_cost, fixed_cost, logistics_cost, channel_fee_rate, promo_cost, "
-                            "vat_inclusive FROM int_operations_inventory WHERE internal_sku = :k AND channel_name = :c AND "
-                            "recorded_date >= :s AND recorded_date <= :e ORDER BY recorded_date",
-                            k=r["internal_sku"], c=r["channel_name"], s=last - timedelta(days=TREND_DAYS - 1), e=last):
+        for x in h["inv"].get((r["internal_sku"], r["channel_name"]), []):
+            if not since <= x["recorded_date"] <= last:
+                continue
             _, rate = net_margin(x["current_selling_price"], _dec(x["purchase_cost"]), _dec(x["fixed_cost"]), _dec(x["logistics_cost"]),
                                  _dec(x["promo_cost"]), _dec(x["channel_fee_rate"]), bool(x["vat_inclusive"]), cfg.vat_rate)
             out.append([str(x["recorded_date"]), str(rate)])
