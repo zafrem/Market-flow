@@ -438,3 +438,12 @@ def test_mi_report_uses_inventory_for_supply_cover(world):
     fresh = next(h for h in world.client.get("/mi/report", headers=login(world, "admin")).json()["health"] if h["category"] == "Fresh")
     # inventory: stock 100+300 over daily sales 10+100 = 3.6 days
     assert fresh["supply"]["cover_days"] == 3.6 and fresh["supply"]["status"] == "BALANCED"
+
+
+def test_mi_report_language_parameter(world):
+    upload(world, "admin", "SEARCH", MI_CSV)
+    h = login(world, "admin")
+    ko = world.client.get("/mi/report?lang=ko", headers=h).json()
+    en = world.client.get("/mi/report", headers=h).json()
+    assert "검색이" in next(r for r in ko["radar"] if r["keyword"] == "dalgi")["changed"] and "Searches" in next(r for r in en["radar"] if r["keyword"] == "dalgi")["changed"]
+    assert world.client.get("/mi/report?lang=fr", headers=h).status_code == 422

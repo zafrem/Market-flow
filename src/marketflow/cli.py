@@ -6,7 +6,7 @@
   python -m marketflow.cli approve|reject|apply|revert ID --as NAME:ROLE      (ROLE: ADMIN | MD | BUYER)
   python -m marketflow.cli export-prices [--since YYYY-MM-DD] [--file OUT.csv]   (applied price changes, for channel bulk upload)
   python -m marketflow.cli import-mi FILE --type SEARCH|BUYER|SKU|PRODUCT|PROMOTION|MEDIA [--source NAME]   (market-intelligence signals)
-  python -m marketflow.cli mi-report [--stable]                     (category health + trend radar)
+  python -m marketflow.cli mi-report [--stable] [--lang en|ko]                     (category health + trend radar)
   python -m marketflow.cli audit
   python -m marketflow.cli review | resolve ID --as NAME:ROLE        (items the machine could not decide: unmatched/unparseable/quarantined)
   python -m marketflow.cli selectors | approve-selector ID | reject-selector ID --as NAME:ROLE
@@ -42,7 +42,7 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
         p = sub.add_parser(name); p.add_argument("rec_id", type=int); p.add_argument("--as", dest="actor", required=True, metavar="NAME:ROLE")
     p = sub.add_parser("export-prices"); p.add_argument("--since"); p.add_argument("--file")
     p = sub.add_parser("import-mi"); p.add_argument("file"); p.add_argument("--type", required=True); p.add_argument("--source", default="")
-    p = sub.add_parser("mi-report"); p.add_argument("--stable", action="store_true")
+    p = sub.add_parser("mi-report"); p.add_argument("--stable", action="store_true"); p.add_argument("--lang", choices=["en", "ko"], default="en")
     sub.add_parser("audit")
     sub.add_parser("review")
     sub.add_parser("selectors")
@@ -156,7 +156,7 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
     if a.cmd == "mi-report":
         from .mi.service import mi_report
         from .mi.store import MiStore
-        rep = mi_report(MiStore(engine), settings, None, a.stable)
+        rep = mi_report(MiStore(engine), settings, None, a.stable, a.lang)
         print(f"as of {rep['as_of']}  signals: {', '.join(rep['signals']) or 'none'}", file=out)
         print("\nCATEGORY HEALTH", file=out)
         for h in rep["health"]:

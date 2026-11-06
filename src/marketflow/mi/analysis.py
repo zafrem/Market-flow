@@ -11,6 +11,7 @@ from datetime import date
 from typing import Any, Iterable
 
 from .config import MiConfig
+from .messages import msg
 
 Series = list[tuple[date, float]]
 STAGES = ("SEED", "EMERGING", "GROWING", "MAINSTREAM", "FADING")
@@ -161,7 +162,7 @@ def _supply_status(sup: dict[str, float] | None, cfg: MiConfig) -> dict[str, Any
             "status": "TIGHT" if days < cfg.tight_days else "SURPLUS" if days > cfg.surplus_days else "BALANCED"}
 
 
-def category_health(rows: list[dict[str, Any]], supply: dict[str, dict[str, float]], cfg: MiConfig) -> list[dict[str, Any]]:
+def category_health(rows: list[dict[str, Any]], supply: dict[str, dict[str, float]], cfg: MiConfig, lang: str = "en") -> list[dict[str, Any]]:
     ix = Index(rows)
     cats = ix.categories()
     demand = {c: _demand_series(ix, c, cfg) for c in cats}
@@ -181,7 +182,7 @@ def category_health(rows: list[dict[str, Any]], supply: dict[str, dict[str, floa
                  "interest_change": None if not interest else (lambda m: None if m is None else round(m, 4))(momentum([v for _, v in interest], cfg.recent_periods)),
                  "share_pct": None if sh is None else round(sh[0], 1), "share_shift_pp": None if sh is None or sh[1] is None else round(sh[1], 1),
                  "supply": sup, "search_leads_demand": lead}
-        entry.update(_narrate_category(entry, cfg))
+        entry.update(_narrate_category(entry, cfg, lang))
         out.append(entry)
     order = {"WEAKENING": 0, "GROWING": 1, "STEADY": 2, "NO_DATA": 3}
     return sorted(out, key=lambda e: (order[e["demand_state"]], -abs(e["demand_change"] or 0), e["category"]))
@@ -191,35 +192,27 @@ def _pct(x: float) -> str:
     return f"{abs(x) * 100:.0f}%"
 
 
-def _narrate_category(e: dict[str, Any], cfg: MiConfig) -> dict[str, str]:
-    metric = {"gmv": "GMV", "unitsold": "Units sold"}.get(e["demand_metric"], e["demand_metric"] or "Demand")
+def _narrate_category(e: dict[str, Any], cfg: MiConfig, lang: str) -> dict[str, str]:
+    m = lambda key, **p: msg(lang, key, **p)                      # noqa: E731
+    metric = m("metric." + e["demand_metric"]) if e["demand_metric"] in {"gmv", "unitsold"} else m("metric.default")
     if e["demand_state"] == "NO_DATA":
-        return {"changed": "Not enough demand data to tell yet.", "why": "Import buyer or SKU data (GMV or units sold) for this category.",
-                "action": "Import demand data."}
-    changed = (f"{metric} is steady (within {_pct(cfg.health_threshold)})" if e["demand_state"] == "STEADY"
-               else f"{metric} {'rose' if e['demand_state'] == 'GROWING' else 'fell'} {_pct(e['demand_change'])}")
+        return {"changed": m("cat.nodata.changed"), "why": m("cat.nodata.why"), "action": m("cat.nodata.action")}
+    state = e["demand_state"]
+    changed = (m("cat.steady", metric=metric, pct=_pct(cfg.health_threshold)) if state == "STEADY"
+               else m("cat.up" if state == "GROWING" else "cat.down", metric=metric, pct=_pct(e["demand_change"])))
     if e["share_shift_pp"] is not None and abs(e["share_shift_pp"]) >= 0.5:
-        changed += f"; its share of total demand {'gained' if e['share_shift_pp'] > 0 else 'lost'} {abs(e['share_shift_pp']):.1f} pt"
+        changed += m("cat.share_up" if e["share_shift_pp"] > 0 else "cat.share_down", pp=f"{abs(e['share_shift_pp']):.1f}")
     lead, sup = e["search_leads_demand"], e["supply"]
-    if lead["verdict"] == "LEADS":
-        why = f"Searches have led demand by {lead['lag']} period(s) here (r={lead['r']}, n={lead['n']}), so search is a usable early signal."
-    elif lead["verdict"] == "COINCIDENT":
-        why = f"Searches move together with demand (r={lead['r']}, n={lead['n']}) but do not lead it."
-    elif lead["verdict"] == "NOT_VERIFIED":
-        why = f"Search has not been verified as a demand predictor here (best r={lead['r']}); read search as interest, not demand."
-    else:
-        why = "Too little overlapping search and demand history to test whether search leads demand."
-    if sup and sup["status"] == "TIGHT":
-        why += f" Stock covers only {sup['cover_days']} days of sales."
-    elif sup and sup["status"] == "SURPLUS":
-        why += f" Stock covers {sup['cover_days']} days of sales."
+    why = m("cat.lead." + lead["verdict"], lag=lead["lag"], r=lead["r"], n=lead["n"])
+    if sup and sup["status"] in {"TIGHT", "SURPLUS"}:
+        why += " " + m("cat.supply." + sup["status"].lower(), days=sup["cover_days"])
     tight, surplus = bool(sup and sup["status"] == "TIGHT"), bool(sup and sup["status"] == "SURPLUS")
-    if e["demand_state"] == "GROWING":
-        action = "Demand is rising while stock is tight: secure supply first." if tight else "Demand is rising: check purchasing plans and promotion room."
-    elif e["demand_state"] == "WEAKENING":
-        action = "Demand is falling and stock is high: hold purchases and consider clearing stock." if surplus else "Demand is falling: review purchasing and promotion plans."
+    if state == "GROWING":
+        action = m("cat.action.up_tight" if tight else "cat.action.up")
+    elif state == "WEAKENING":
+        action = m("cat.action.down_surplus" if surplus else "cat.action.down")
     else:
-        action = "No action needed on demand." + (" Stock is tight; check supply." if tight else "")
+        action = m("cat.action.steady") + (" " + m("cat.action.steady_tight") if tight else "")
     return {"changed": changed, "why": why, "action": action}
 
 
@@ -233,7 +226,7 @@ def _level_percentiles(levels: dict[str, float]) -> dict[str, float | None]:
     return {k: sum(1 for o in ks if levels[o] < levels[k]) / (len(ks) - 1) for k in ks}
 
 
-def trend_radar(rows: list[dict[str, Any]], health: list[dict[str, Any]], cfg: MiConfig, include_stable: bool = False) -> list[dict[str, Any]]:
+def trend_radar(rows: list[dict[str, Any]], health: list[dict[str, Any]], cfg: MiConfig, include_stable: bool = False, lang: str = "en") -> list[dict[str, Any]]:
     ix = Index(rows)
     by_cat = {h["category"]: h for h in health}
     # per keyword: search series and, for the corroborating signals, mentions per period (all metrics summed)
@@ -281,38 +274,28 @@ def trend_radar(rows: list[dict[str, Any]], health: list[dict[str, Any]], cfg: M
                  "score": round(score, 1), "opportunity": round(score * (1 - (lp if lp is not None else 0.0)), 1),
                  "search_series": _iso(s), "signals": {sig: round(recent_mentions.get(sig, 0.0), 2) for sig in ("product", "promotion", "media")},
                  "corroborating": corroborating}
-        entry.update(_narrate_keyword(entry, by_cat.get(c), cfg))
+        entry.update(_narrate_keyword(entry, by_cat.get(c), cfg, lang))
         if stage != "STABLE" or include_stable:
             out.append(entry)
     return sorted(out, key=lambda e: (-e["opportunity"] if e["stage"] in {"SEED", "EMERGING", "GROWING"} else 1, STAGES.index(e["stage"]) if e["stage"] in STAGES else 9, -e["score"], e["keyword"]))
 
 
-def _narrate_keyword(e: dict[str, Any], cat: dict[str, Any] | None, cfg: MiConfig) -> dict[str, str]:
+def _narrate_keyword(e: dict[str, Any], cat: dict[str, Any] | None, cfg: MiConfig, lang: str) -> dict[str, str]:
+    m = lambda key, **p: msg(lang, key, **p)                      # noqa: E731
     g, stage, r = e["growth"], e["stage"], cfg.recent_periods
-    changed = (f"Searches {'rose' if g > 0 else 'fell' if g < 0 else 'held'} {_pct(g)}" if abs(g) >= 0.005 else "Searches held flat") + \
-              f" (last {r} periods vs the {r} before)."
+    changed = m("kw.up" if g >= 0.005 else "kw.down" if g <= -0.005 else "kw.flat", pct=_pct(g), r=r)
+    signals = ", ".join(m("signal." + sig) for sig in e["corroborating"])
     lead = (cat or {}).get("search_leads_demand", {}).get("verdict")
-    if stage == "SEED":
-        why = "Rising from a small base; no product, promotion or media signal confirms it yet."
-    elif stage == "EMERGING":
-        why = f"Rising from a small base and also showing up in: {', '.join(e['corroborating'])}."
+    if stage == "EMERGING":
+        why = m("kw.why.EMERGING", signals=signals)
     elif stage == "GROWING":
-        why = f"Rising on already-high volume (top {max(1, 100 - round(e['volume_percentile'] * 100))}% in {e['category'] or 'its category'})."
+        why = m("kw.why.GROWING", top=max(1, 100 - round(e["volume_percentile"] * 100)), category=e["category"] or m("its_category"))
         if e["corroborating"]:
-            why += f" Also seen in: {', '.join(e['corroborating'])}."
-    elif stage == "FADING":
-        why = "Interest is falling."
-    elif stage == "MAINSTREAM":
-        why = "High, steady volume: established demand rather than a trend."
+            why += " " + m("kw.why.GROWING_also", signals=signals)
     else:
-        why = "No notable change."
+        why = m("kw.why." + stage)
     if stage in {"SEED", "EMERGING", "GROWING"}:
-        why += " Search has led demand in this category, so this is a credible early signal." if lead == "LEADS" else \
-               " This measures interest, not demand: search is not verified as a demand predictor in this category."
+        why += " " + m("kw.lead" if lead == "LEADS" else "kw.unverified")
     tight = bool(cat and cat.get("supply") and cat["supply"]["status"] == "TIGHT")
-    action = {"SEED": "Watch: keep it on the radar and re-check next period.",
-              "EMERGING": "Review assortment: check whether we carry it or can source it.",
-              "GROWING": "Check supply and pricing before demand arrives." + (" Category stock is already tight." if tight else ""),
-              "FADING": "Avoid new purchase commitments; review promotion plans.",
-              "MAINSTREAM": "Keep availability; this is core demand.", "STABLE": "No action."}[stage]
+    action = m("kw.action." + stage) + (" " + m("kw.action.GROWING_tight") if stage == "GROWING" and tight else "")
     return {"changed": changed, "why": why, "action": action}

@@ -6,7 +6,7 @@ const won = (v) => (v === null || v === undefined) ? "–" : Number(v).toLocaleS
 
 async function api(path, opts = {}) {
   const r = await fetch(path, { ...opts, headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) } });
-  if (r.status === 401 && token) { signOut(); throw new Error("Session expired"); }
+  if (r.status === 401 && token) { signOut(); throw new Error(t("session_expired")); }
   const body = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(body.detail || r.statusText);
   return body;
@@ -24,18 +24,18 @@ function change(points, points_unit = false) {
   const a = points[0].v, b = points[points.length - 1].v, days = Math.round((points[points.length - 1].t - points[0].t) / DAY_MS);
   const d = points_unit ? b - a : (a ? (b - a) / a * 100 : 0);                       // margins change in percentage points, prices in %
   const arrow = Math.abs(d) < 0.05 ? "▬" : d > 0 ? "▲" : "▼";
-  return arrow + " " + Math.abs(d).toFixed(1) + (points_unit ? " pt" : "%") + " over " + days + "d";
+  return t("chart.over", { arrow, delta: Math.abs(d).toFixed(1) + (points_unit ? " pt" : "%"), d: days });
 }
 
 function sparkline(series, cls, name, fmt) {
   const pts = parsePoints(series);
-  if (pts.length < 2) return el("span", pts.length ? "1 day of data" : "No history", "nohist");
+  if (pts.length < 2) return el("span", pts.length ? t("chart.one_day") : t("chart.none"), "nohist");
   const t0 = pts[0].t, span = pts[pts.length - 1].t - t0 || 1;
   const lo = Math.min(...pts.map((p) => p.v)), hi = Math.max(...pts.map((p) => p.v)), range = hi - lo;
   const x = (p) => PAD_X + (p.t - t0) / span * (W - 2 * PAD_X);                       // calendar-scaled: gaps stay visible
   const y = (p) => range === 0 ? H / 2 : PAD_Y + (hi - p.v) / range * (H - 2 * PAD_Y);
   const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, class: "spark " + cls, role: "img",
-    "aria-label": name + ", last " + pts.length + " days: " + pts.map((p) => p.d + " " + fmt(p.v)).join(", ") });
+    "aria-label": t("chart.aria", { name, n: pts.length, points: pts.map((p) => p.d + " " + fmt(p.v)).join(", ") }) });
   svg.append(svgEl("path", { class: "line", d: pts.map((p, i) => (i ? "L" : "M") + x(p).toFixed(1) + " " + y(p).toFixed(1)).join(" ") }));
   const last = pts[pts.length - 1];
   svg.append(svgEl("circle", { class: "dot", cx: x(last).toFixed(1), cy: y(last).toFixed(1), r: 4 }));
@@ -46,8 +46,8 @@ function sparkline(series, cls, name, fmt) {
     let best = pts[0]; for (const p of pts) if (Math.abs(x(p) - frac * W) < Math.abs(x(best) - frac * W)) best = p;
     cross.setAttribute("x1", x(best)); cross.setAttribute("x2", x(best)); mark.setAttribute("cx", x(best)); mark.setAttribute("cy", y(best));
     cross.removeAttribute("hidden"); mark.removeAttribute("hidden");
-    const t = tip(); t.replaceChildren(el("b", fmt(best.v)), document.createTextNode(name + " · " + best.d)); t.hidden = false;
-    t.style.left = Math.min(ev.clientX + 14, window.innerWidth - 190) + "px"; t.style.top = Math.max(ev.clientY - 52, 4) + "px";
+    const tipEl = tip(); tipEl.replaceChildren(el("b", fmt(best.v)), document.createTextNode(name + " · " + best.d)); tipEl.hidden = false;
+    tipEl.style.left = Math.min(ev.clientX + 14, window.innerWidth - 190) + "px"; tipEl.style.top = Math.max(ev.clientY - 52, 4) + "px";
   };
   const hide = () => { cross.setAttribute("hidden", ""); mark.setAttribute("hidden", ""); tip().hidden = true; };
   svg.addEventListener("pointermove", show); svg.addEventListener("pointerdown", show); svg.addEventListener("pointerleave", hide);
@@ -71,9 +71,9 @@ function renderSummary() {
   const priced = lastRows.filter((r) => r.competitors.lowest_pack_price);
   const above = priced.filter((r) => Number(r.internal.current_selling_price) > Number(r.competitors.lowest_pack_price)).length;
   const stockouts = lastRows.reduce((n, r) => n + (r.competitors.out_of_stock || 0), 0);
-  const figs = [[lastRows.length, "items tracked", false], [above, "priced above the lowest competitor", above > 0],
-                [stockouts, "competitor listings out of stock", false]];
-  if (pendingCount !== null) figs.push([pendingCount, "recommendations awaiting a decision", pendingCount > 0]);
+  const figs = [[lastRows.length, t("sum.items"), false], [above, t("sum.above"), above > 0],
+                [stockouts, t("sum.oos"), false]];
+  if (pendingCount !== null) figs.push([pendingCount, t("sum.pending"), pendingCount > 0]);
   $("#summary").replaceChildren(...figs.map(([n, label, alert]) => { const f = el("div", "", alert ? "fig alert" : "fig"); f.append(el("b", won(n)), el("span", label)); return f; }));
 }
 function setBadge(tab, n) {
@@ -83,11 +83,24 @@ function setBadge(tab, n) {
   badge.textContent = n;
 }
 
-const sentence = (code) => { const t = String(code).replace(/_/g, " ").toLowerCase(); return t.charAt(0).toUpperCase() + t.slice(1); };
 
 function toast(msg) { $("#toast").textContent = msg || ""; }
 
 function signOut() { token = me = null; lastRows = []; miReport = null; pendingCount = null; tip().hidden = true; $("#app").hidden = true; $("#login").hidden = false; $("#who").textContent = ""; }
+function renderWho() {
+  if (!me) return;
+  const out = el("button", t("signout")); out.onclick = signOut;
+  $("#who").replaceChildren(document.createTextNode(me.name + " · " + me.role + "  "), out);
+}
+const reloadAll = () => Promise.all([loadMatrix(), loadMi(), loadRecs(), ...(me.role === "BUYER" ? [] : [loadReview(), loadSelectors()])]);
+function setLang(l) {
+  lang = l;
+  try { localStorage.setItem("mf-lang", l); } catch (e) { /* storage blocked: the choice lasts until reload */ }
+  applyStatic(); $("#lang").textContent = t("lang.switch"); renderWho();
+  if (token) reloadAll().catch((e) => toast(e.message));
+}
+$("#lang").addEventListener("click", () => setLang(lang === "ko" ? "en" : "ko"));
+applyStatic(); $("#lang").textContent = t("lang.switch");
 
 $("#login-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
@@ -96,12 +109,11 @@ $("#login-form").addEventListener("submit", async (ev) => {
     const res = await api("/auth/login", { method: "POST", body: JSON.stringify({ email: f.get("email"), password: f.get("password") }) });
     token = res.access_token; me = res.user; ev.target.reset(); $("#login-error").textContent = "";
     $("#login").hidden = true; $("#app").hidden = false;
-    const out = el("button", "Sign out"); out.onclick = signOut;
-    $("#who").replaceChildren(document.createTextNode(me.name + " · " + me.role + "  "), out);
+    renderWho();
     document.querySelectorAll(".cost, .decider").forEach((c) => c.hidden = me.role === "BUYER");
     toast("");
     watch = new Set((await api("/watchlist")).std_item_ids);
-    await Promise.all([loadMatrix(), loadMi(), loadRecs(), ...(me.role === "BUYER" ? [] : [loadReview(), loadSelectors()])]);
+    await reloadAll();
   } catch (e) { $("#login-error").textContent = e.message; }
 });
 
@@ -117,24 +129,24 @@ async function loadMatrix() {
   lastRows = rows; renderSummary();
   const body = $("#matrix-table tbody"); body.replaceChildren();
   if (!rows.length) {
-    const td = el("td", $("#only-watch").checked ? "Nothing on your watchlist yet. Star an item to follow it here." : "No items yet. Import inventory with the import-erp command to see them here.", "empty");
+    const td = el("td", $("#only-watch").checked ? t("empty.watch") : t("empty.items"), "empty");
     td.colSpan = 8; const tr = el("tr"); tr.append(td); body.append(tr); return;
   }
-  const decimals = (v) => v.toLocaleString("ko-KR", { maximumFractionDigits: 2 });
+  const decimals = (v) => v.toLocaleString(numLocale(), { maximumFractionDigits: 2 });
   for (const r of rows) {
-    const tr = el("tr"), t = r.trend || {};
+    const tr = el("tr"), tr_ = r.trend || {};
     const name = el("td"); name.append(el("span", r.item_name, "item"), el("small", r.category_l + " / " + r.category_m + " · " + r.internal_sku));
     let margin = el("td", "", "num cost margin"); margin.hidden = me.role === "BUYER";
     if (r.internal.margin_rate !== undefined) {
       const low = Number(r.internal.margin_rate) <= 10;
-      margin = trendCell((low ? "⚠ " : "✓ ") + r.internal.margin_rate + "%", r.internal.margin_trend, "c-margin", "Margin %", (v) => v.toFixed(2) + "%", "", "num cost margin " + (low ? "red" : "green"), true);
+      margin = trendCell((low ? "⚠ " : "✓ ") + r.internal.margin_rate + "%", r.internal.margin_trend, "c-margin", t("chart.margin"), (v) => v.toFixed(2) + "%", "", "num cost margin " + (low ? "red" : "green"), true);
     }
-    const bench = trendCell(r.public_benchmark ? won(r.public_benchmark.normalized_price) : "–", t.wholesale, "c-wholesale", "Wholesale", decimals);
-    const ours = trendCell(won(r.internal.current_selling_price), t.ours, "c-ours", "Our price", won);
-    const oos = r.competitors.out_of_stock ? r.competitors.out_of_stock + "/" + r.competitors.listings + " out of stock" : "";
-    const comp = trendCell(r.competitors.lowest_pack_price ? won(r.competitors.lowest_pack_price) : "–", t.competitor, "c-comp", "Lowest competitor", decimals, oos);
+    const bench = trendCell(r.public_benchmark ? won(r.public_benchmark.normalized_price) : "–", tr_.wholesale, "c-wholesale", t("th.wholesale"), decimals);
+    const ours = trendCell(won(r.internal.current_selling_price), tr_.ours, "c-ours", t("th.ours"), won);
+    const oos = r.competitors.out_of_stock ? t("oos", { n: r.competitors.out_of_stock, total: r.competitors.listings }) : "";
+    const comp = trendCell(r.competitors.lowest_pack_price ? won(r.competitors.lowest_pack_price) : "–", tr_.competitor, "c-comp", t("th.lowest"), decimals, oos);
     const star = el("button", watch.has(r.std_item_id) ? "★" : "☆", "star" + (watch.has(r.std_item_id) ? " on" : ""));
-    star.setAttribute("aria-label", (watch.has(r.std_item_id) ? "Remove " : "Add ") + r.item_name + (watch.has(r.std_item_id) ? " from" : " to") + " watchlist");
+    star.setAttribute("aria-label", t(watch.has(r.std_item_id) ? "watch.remove" : "watch.add", { name: r.item_name }));
     star.onclick = async () => {
       const had = watch.has(r.std_item_id);
       had ? watch.delete(r.std_item_id) : watch.add(r.std_item_id);
@@ -152,15 +164,15 @@ async function loadRecs() {
   const { recommendations } = await api("/recommendations");
   const body = $("#recs-table tbody"); body.replaceChildren();
   pendingCount = recommendations.filter((r) => r.status === "PENDING").length; setBadge("recs", pendingCount); renderSummary();
-  if (!recommendations.length) { const td = el("td", "No recommendations yet. They appear after the next scheduled decision run.", "empty"); td.colSpan = 9; const tr = el("tr"); tr.append(td); body.append(tr); }
+  if (!recommendations.length) { const td = el("td", t("empty.recs"), "empty"); td.colSpan = 9; const tr = el("tr"); tr.append(td); body.append(tr); }
   const canDecide = me.role !== "BUYER";
   for (const r of recommendations) {
     const tr = el("tr"), flags = el("td");
-    for (const [k, v] of Object.entries(r.flags)) if (k === k.toUpperCase() && v) flags.append(el("span", "⚠ " + sentence(k), "pill " + (k.startsWith("REVERSE") ? "red" : "amber")));
+    for (const [k, v] of Object.entries(r.flags)) if (k === k.toUpperCase() && v) flags.append(el("span", "⚠ " + codeText(k), "pill " + (k.startsWith("REVERSE") ? "red" : "amber")));
     const act = el("td");
     const next = { PENDING: ["approve", "reject"], APPROVED: ["apply"], APPLIED: ["revert"] }[r.status] || [];
-    if (canDecide) for (const a of next) { const b = el("button", a); b.onclick = async () => { try { await api("/recommendations/" + r.rec_id + "/" + a, { method: "POST" }); await Promise.all([loadRecs(), loadMatrix()]); } catch (e) { toast(e.message); } }; act.append(b); }
-    tr.append(el("td", r.rec_id), el("td", r.item_name), el("td", r.channel_name), el("td", won(r.current_price), "num"), el("td", won(r.suggested_price), "num"), el("td", sentence(r.reason_code)), flags, el("td", sentence(r.status), "status " + ({ PENDING: "amber", APPLIED: "green" }[r.status] || "")), act);
+    if (canDecide) for (const a of next) { const b = el("button", t("act." + a)); b.onclick = async () => { try { await api("/recommendations/" + r.rec_id + "/" + a, { method: "POST" }); await Promise.all([loadRecs(), loadMatrix()]); } catch (e) { toast(e.message); } }; act.append(b); }
+    tr.append(el("td", r.rec_id), el("td", r.item_name), el("td", r.channel_name), el("td", won(r.current_price), "num"), el("td", won(r.suggested_price), "num"), el("td", codeText(r.reason_code)), flags, el("td", codeText(r.status), "status " + ({ PENDING: "amber", APPLIED: "green" }[r.status] || "")), act);
     body.append(tr);
   }
 }
@@ -173,11 +185,11 @@ async function loadReview() {
   const { items } = await api("/review");
   setBadge("review", items.length);
   const body = $("#review-table tbody"); body.replaceChildren();
-  if (!items.length) { const td = el("td", "Nothing to review. Items the system cannot match or parse will show up here.", "empty"); td.colSpan = 6; const tr = el("tr"); tr.append(td); body.append(tr); }
+  if (!items.length) { const td = el("td", t("empty.review"), "empty"); td.colSpan = 6; const tr = el("tr"); tr.append(td); body.append(tr); }
   for (const r of items) {
-    const done = el("button", "resolve"); done.onclick = () => post("/review/" + r.review_id + "/resolve", loadReview);
+    const done = el("button", t("act.resolve")); done.onclick = () => post("/review/" + r.review_id + "/resolve", loadReview);
     const act = el("td"); act.append(done);
-    const tr = el("tr"); tr.append(el("td", r.review_id), el("td", sentence(r.kind)), el("td", r.source), el("td", r.item_key), el("td", r.reason), act);
+    const tr = el("tr"); tr.append(el("td", r.review_id), el("td", codeText(r.kind)), el("td", r.source), el("td", r.item_key), el("td", r.reason), act);
     body.append(tr);
   }
 }
@@ -186,10 +198,10 @@ async function loadSelectors() {
   const { candidates } = await api("/selectors");
   setBadge("selectors", candidates.filter((c) => c.status === "PENDING").length);
   const body = $("#selectors-table tbody"); body.replaceChildren();
-  if (!candidates.length) { const td = el("td", "No selector proposals. When a retailer changes its page, the system proposes new selectors here.", "empty"); td.colSpan = 7; const tr = el("tr"); tr.append(td); body.append(tr); }
+  if (!candidates.length) { const td = el("td", t("empty.selectors"), "empty"); td.colSpan = 7; const tr = el("tr"); tr.append(td); body.append(tr); }
   for (const c of candidates) {
     const act = el("td");
-    if (c.status === "PENDING") for (const a of ["approve", "reject"]) { const b = el("button", a); b.onclick = () => post("/selectors/" + c.cand_id + "/" + a, loadSelectors); act.append(b); }
+    if (c.status === "PENDING") for (const a of ["approve", "reject"]) { const b = el("button", t("act." + a)); b.onclick = () => post("/selectors/" + c.cand_id + "/" + a, loadSelectors); act.append(b); }
     const tr = el("tr");
     tr.append(el("td", c.cand_id), el("td", c.platform), el("td", c.status), el("td", c.selectors.item), el("td", c.selectors.fields.title.css), el("td", c.selectors.fields.sale_price.css), act);
     body.append(tr);
@@ -199,53 +211,51 @@ async function loadSelectors() {
 // ---- market intelligence: category health + trend radar -------------------------------------------------------------
 let miReport = null;
 const pctText = (x) => x === null || x === undefined ? "–" : (x > 0 ? "+" : x < 0 ? "−" : "") + Math.abs(x * 100).toFixed(0) + "%";
-const STAGE = { SEED: "◔ Seed", EMERGING: "◑ Emerging", GROWING: "▲ Growing", MAINSTREAM: "● Mainstream", FADING: "▼ Fading", STABLE: "▬ Flat" };
-const DEMAND = { GROWING: "▲ Rising", WEAKENING: "▼ Falling", STEADY: "▬ Steady", NO_DATA: "No data" };
 
 // The three questions the framework asks of every signal, as one cell
 function story(r) {
   const td = el("td", "", "story");
-  for (const [label, text] of [["What changed", r.changed], ["Why it matters", r.why], ["What to do", r.action]]) {
+  for (const [label, text] of [[t("story.changed"), r.changed], [t("story.why"), r.why], [t("story.action"), r.action]]) {
     const p = el("p"); p.append(el("b", label + ": "), document.createTextNode(text)); td.append(p);
   }
   return td;
 }
 const emptyRow = (body, cols, text) => { const td = el("td", text, "empty"); td.colSpan = cols; const tr = el("tr"); tr.append(td); body.append(tr); };
-const compact = (v) => Number(v).toLocaleString("ko-KR", { notation: "compact", maximumFractionDigits: 1 });
+const compact = (v) => Number(v).toLocaleString(numLocale(), { notation: "compact", maximumFractionDigits: 1 });
 
 function renderHealth(rows) {
   const body = $("#health-table tbody"); body.replaceChildren();
-  if (!rows.length) return emptyRow(body, 6, "No market-signal data yet. Import buyer or SKU sales with: python -m marketflow.cli import-mi FILE.csv --type BUYER");
+  if (!rows.length) return emptyRow(body, 6, t("empty.health"));
   for (const h of rows) {
     const tr = el("tr"), name = el("td"), last = (s) => s.length ? s[s.length - 1][1] : null;
-    name.append(el("span", h.category, "item"), el("small", DEMAND[h.demand_state]));
-    const unit = { gmv: "GMV", unitsold: "Units sold" }[h.demand_metric] || "Demand";
+    name.append(el("span", h.category, "item"), el("small", t("demand." + h.demand_state)));
+    const unit = t(["gmv", "unitsold"].includes(h.demand_metric) ? "metric." + h.demand_metric : "metric.default");
     tr.append(name,
-      h.demand_series.length ? trendCell(compact(last(h.demand_series)), h.demand_series, "c-margin", h.category + " " + unit, (v) => compact(v), pctText(h.demand_change) + " vs earlier") : el("td", "–", "num"),
-      h.interest_series.length ? trendCell(compact(last(h.interest_series)), h.interest_series, "c-margin", h.category + " searches", (v) => compact(v), pctText(h.interest_change) + " vs earlier") : el("td", "–", "num"));
-    tr.append(el("td", h.share_pct === null ? "–" : h.share_pct + "%" + (h.share_shift_pp === null ? "" : " (" + (h.share_shift_pp > 0 ? "+" : h.share_shift_pp < 0 ? "−" : "") + Math.abs(h.share_shift_pp) + " pt)"), "num"));
+      h.demand_series.length ? trendCell(compact(last(h.demand_series)), h.demand_series, "c-margin", h.category + " " + unit, (v) => compact(v), t("vs_earlier", { pct: pctText(h.demand_change) })) : el("td", "–", "num"),
+      h.interest_series.length ? trendCell(compact(last(h.interest_series)), h.interest_series, "c-margin", h.category + " " + t("searches"), (v) => compact(v), t("vs_earlier", { pct: pctText(h.interest_change) })) : el("td", "–", "num"));
+    tr.append(el("td", h.share_pct === null ? "–" : h.share_pct + "%" + (h.share_shift_pp === null ? "" : t("share_shift", { pp: (h.share_shift_pp > 0 ? "+" : h.share_shift_pp < 0 ? "−" : "") + Math.abs(h.share_shift_pp) })), "num"));
     const sup = h.supply;
-    tr.append(el("td", !sup ? "–" : sup.cover_days === null ? "No sales" : sup.cover_days + " days · " + sup.status.toLowerCase(), "num"), story(h));
+    tr.append(el("td", !sup ? "–" : sup.cover_days === null ? t("no_sales") : t("cover", { days: sup.cover_days, status: t("supply." + sup.status) }), "num"), story(h));
     body.append(tr);
   }
 }
 
 function renderRadar(rows) {
   const body = $("#radar-table tbody"); body.replaceChildren();
-  if (!rows.length) return emptyRow(body, 6, "Nothing on the radar yet. Import weekly keyword searches with: python -m marketflow.cli import-mi FILE.csv --type SEARCH");
+  if (!rows.length) return emptyRow(body, 6, t("empty.radar"));
   for (const r of rows) {
-    const tr = el("tr"), name = el("td"), sig = Object.entries(r.signals).filter(([, v]) => v > 0).map(([k, v]) => sentence(k) + " " + v);
-    name.append(el("span", r.keyword, "item"), el("small", r.category || "No category"));
+    const tr = el("tr"), name = el("td"), sig = Object.entries(r.signals).filter(([, v]) => v > 0).map(([k, v]) => t("signal." + k) + " " + v);
+    name.append(el("span", r.keyword, "item"), el("small", r.category || t("no_category")));
     const last = r.search_series[r.search_series.length - 1];
-    tr.append(name, el("td", STAGE[r.stage] || r.stage, "stage"),
-      trendCell(compact(last[1]), r.search_series, "c-margin", r.keyword + " searches", (v) => compact(v), pctText(r.growth) + " vs earlier"),
-      el("td", sig.length ? sig.join(" · ") : "None yet"), el("td", r.stage === "FADING" || r.stage === "STABLE" ? "–" : r.score, "num"), story(r));
+    tr.append(name, el("td", t("stage." + r.stage), "stage"),
+      trendCell(compact(last[1]), r.search_series, "c-margin", r.keyword + " " + t("searches"), (v) => compact(v), t("vs_earlier", { pct: pctText(r.growth) })),
+      el("td", sig.length ? sig.join(" · ") : t("none_yet")), el("td", r.stage === "FADING" || r.stage === "STABLE" ? "–" : r.score, "num"), story(r));
     body.append(tr);
   }
 }
 
 async function loadMi() {
-  miReport = await api("/mi/report" + ($("#radar-stable").checked ? "?include_stable=true" : ""));
+  miReport = await api("/mi/report?lang=" + lang + ($("#radar-stable").checked ? "&include_stable=true" : ""));
   renderHealth(miReport.health); renderRadar(miReport.radar);
   setBadge("radar", miReport.radar.filter((r) => ["SEED", "EMERGING"].includes(r.stage)).length);
 }

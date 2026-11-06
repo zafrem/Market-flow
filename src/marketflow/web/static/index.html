@@ -12,61 +12,62 @@
       <svg viewBox="0 0 32 32" aria-hidden="true"><path class="tag" d="M3 5a2 2 0 0 1 2-2h11.2a2 2 0 0 1 1.4.6l11.8 11.8a2 2 0 0 1 0 2.8l-9.8 9.8a2 2 0 0 1-2.8 0L3.6 16.2A2 2 0 0 1 3 14.8z"/><circle class="hole" cx="10" cy="10" r="2.4"/><polyline class="stroke" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" points="11,21 15,17 18,19.5 23,14"/></svg>
       <h1>MarketFlow</h1>
     </div>
-    <div id="who"></div>
+    <div class="hdr-right"><button id="lang" type="button"></button><div id="who"></div></div>
   </header>
   <main>
     <section id="login">
       <form id="login-form">
-        <label>Email <input name="email" type="email" autocomplete="username" required></label>
-        <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
-        <button type="submit">Sign in</button>
+        <label><span data-i18n="login.email">Email</span> <input name="email" type="email" autocomplete="username" required></label>
+        <label><span data-i18n="login.password">Password</span> <input name="password" type="password" autocomplete="current-password" required></label>
+        <button type="submit" data-i18n="login.submit">Sign in</button>
         <p id="login-error" role="alert"></p>
       </form>
     </section>
     <section id="app" hidden>
-      <div id="summary" class="summary" aria-label="Summary"></div>
-      <nav><button data-tab="matrix" class="active">Comparison matrix</button><button data-tab="health">Category health</button><button data-tab="radar">Trend radar</button><button data-tab="recs">Recommendations</button><button data-tab="review" class="decider">Review queue</button><button data-tab="selectors" class="decider">Selector candidates</button></nav>
+      <div id="summary" class="summary" data-i18n-label="summary" aria-label="Summary"></div>
+      <nav><button data-tab="matrix" class="active"><span data-i18n="tab.matrix">Comparison matrix</span></button><button data-tab="health"><span data-i18n="tab.health">Category health</span></button><button data-tab="radar"><span data-i18n="tab.radar">Trend radar</span></button><button data-tab="recs"><span data-i18n="tab.recs">Recommendations</span></button><button data-tab="review" class="decider"><span data-i18n="tab.review">Review queue</span></button><button data-tab="selectors" class="decider"><span data-i18n="tab.selectors">Selector candidates</span></button></nav>
       <p id="toast" role="status"></p>
       <div id="matrix">
         <div class="toolbar">
-          <label class="inline"><input type="checkbox" id="only-watch"> Watchlist only</label>
-          <p class="hint">Charts show the last 14 days. Hover a chart for daily values.</p>
+          <label class="inline"><input type="checkbox" id="only-watch"> <span data-i18n="watch_only">Watchlist only</span></label>
+          <p class="hint" data-i18n="matrix.hint">Charts show the last 14 days. Hover a chart for daily values.</p>
         </div>
         <div class="scroll"><table id="matrix-table"><thead><tr>
-          <th>Item</th><th>Channel</th>
-          <th class="r"><span class="legend-dot c-wholesale"></span>Wholesale<br><small>per standard unit</small></th>
-          <th class="r"><span class="legend-dot c-ours"></span>Our price</th>
-          <th class="cost r">Margin</th>
-          <th class="r"><span class="legend-dot c-comp"></span>Lowest competitor<br><small>pack price</small></th>
-          <th class="r">Stock</th><th>Watch</th>
+          <th data-i18n="th.item">Item</th><th data-i18n="th.channel">Channel</th>
+          <th class="r"><span class="legend-dot c-wholesale"></span><span data-i18n="th.wholesale">Wholesale</span><br><small data-i18n="th.per_unit">per standard unit</small></th>
+          <th class="r"><span class="legend-dot c-ours"></span><span data-i18n="th.ours">Our price</span></th>
+          <th class="cost r" data-i18n="th.margin">Margin</th>
+          <th class="r"><span class="legend-dot c-comp"></span><span data-i18n="th.lowest">Lowest competitor</span><br><small data-i18n="th.pack">pack price</small></th>
+          <th class="r" data-i18n="th.stock">Stock</th><th data-i18n="th.watch">Watch</th>
         </tr></thead><tbody></tbody></table></div>
       </div>
       <div id="health" hidden>
-        <div class="toolbar"><p class="hint" id="health-hint">Demand is real sales (GMV or units sold); search is shown as interest only.</p></div>
+        <div class="toolbar"><p class="hint" data-i18n="health.hint">Demand is real sales (GMV or units sold); search is shown as interest only.</p></div>
         <div class="scroll"><table id="health-table"><thead><tr>
-          <th>Category</th><th class="r">Demand</th><th class="r">Search interest</th><th class="r">Share of demand</th><th class="r">Stock cover</th><th>What changed · why · what to do</th>
+          <th data-i18n="th.category">Category</th><th class="r" data-i18n="th.demand">Demand</th><th class="r" data-i18n="th.interest">Search interest</th><th class="r" data-i18n="th.share">Share of demand</th><th class="r" data-i18n="th.cover">Stock cover</th><th data-i18n="th.story">What changed · why · what to do</th>
         </tr></thead><tbody></tbody></table></div>
       </div>
       <div id="radar" hidden>
-        <div class="toolbar"><p class="hint">Keywords gaining interest, ranked by opportunity: rising, still small, and backed by other signals. Interest is not demand.</p>
-          <label class="inline"><input type="checkbox" id="radar-stable"> Include flat keywords</label></div>
+        <div class="toolbar"><p class="hint" data-i18n="radar.hint">Keywords gaining interest, ranked by opportunity: rising, still small, and backed by other signals. Interest is not demand.</p>
+          <label class="inline"><input type="checkbox" id="radar-stable"> <span data-i18n="radar.stable">Include flat keywords</span></label></div>
         <div class="scroll"><table id="radar-table"><thead><tr>
-          <th>Keyword</th><th>Stage</th><th class="r">Searches</th><th>Other signals</th><th class="r">Score</th><th>What changed · why · what to do</th>
+          <th data-i18n="th.keyword">Keyword</th><th data-i18n="th.stage">Stage</th><th class="r" data-i18n="th.searches">Searches</th><th data-i18n="th.other">Other signals</th><th class="r" data-i18n="th.score">Score</th><th data-i18n="th.story">What changed · why · what to do</th>
         </tr></thead><tbody></tbody></table></div>
       </div>
       <div id="recs" hidden>
-        <p class="decider"><button id="export-applied">Export applied prices (CSV)</button></p>
-        <div class="scroll"><table id="recs-table"><thead><tr><th>#</th><th>Item</th><th>Channel</th><th class="r">Current</th><th class="r">Suggested</th><th>Reason</th><th>Flags</th><th>Status</th><th></th></tr></thead><tbody></tbody></table></div>
+        <p class="decider"><button id="export-applied" data-i18n="export">Export applied prices (CSV)</button></p>
+        <div class="scroll"><table id="recs-table"><thead><tr><th>#</th><th data-i18n="th.item">Item</th><th data-i18n="th.channel">Channel</th><th class="r">Current</th><th class="r">Suggested</th><th>Reason</th><th>Flags</th><th>Status</th><th></th></tr></thead><tbody></tbody></table></div>
       </div>
       <div id="review" hidden>
-        <div class="scroll"><table id="review-table"><thead><tr><th>#</th><th>Kind</th><th>Source</th><th>Item</th><th>Reason</th><th></th></tr></thead><tbody></tbody></table></div>
+        <div class="scroll"><table id="review-table"><thead><tr><th data-i18n="th.num">#</th><th data-i18n="th.kind">Kind</th><th data-i18n="th.source">Source</th><th data-i18n="th.item">Item</th><th data-i18n="th.reason">Reason</th><th></th></tr></thead><tbody></tbody></table></div>
       </div>
       <div id="selectors" hidden>
-        <div class="scroll"><table id="selectors-table"><thead><tr><th>#</th><th>Platform</th><th>Status</th><th>Item</th><th>Title</th><th>Price</th><th></th></tr></thead><tbody></tbody></table></div>
+        <div class="scroll"><table id="selectors-table"><thead><tr><th data-i18n="th.num">#</th><th data-i18n="th.platform">Platform</th><th data-i18n="th.status">Status</th><th data-i18n="th.item">Item</th><th data-i18n="th.title">Title</th><th data-i18n="th.price">Price</th><th></th></tr></thead><tbody></tbody></table></div>
       </div>
     </section>
   </main>
   <div id="tip" role="tooltip" hidden></div>
+  <script src="/static/i18n.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

@@ -6,7 +6,7 @@ import { JSDOM } from "jsdom";
 
 const STATIC = new URL("../../src/marketflow/web/static/", import.meta.url);
 const html = readFileSync(new URL("index.html", STATIC), "utf8");
-const js = readFileSync(new URL("app.js", STATIC), "utf8");
+const js = readFileSync(new URL("i18n.js", STATIC), "utf8") + "\n" + readFileSync(new URL("app.js", STATIC), "utf8");   // one eval: top-level let/const must share a scope, as <script> tags do
 const settle = async () => { for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 5)); };
 
 const ROW = (name, internal) => ({ std_item_id: 1, item_name: name, category_l: "Fresh", category_m: "Fruit", internal_sku: "APPLE-1", channel_name: "SHOPA",
@@ -300,7 +300,7 @@ test("category health shows demand and interest charts, share, supply and the th
   const t = boot({ routes: { "GET /mi/report": () => [200, MI] } }); await t.login();
   const row = t.d.querySelector("#health-table tbody tr"), cells = [...row.children].map(text);
   assert.match(cells[0], /Fresh/); assert.match(cells[0], /▲ Rising/);
-  assert.match(cells[1], /125만/); assert.match(cells[1], /\+12% vs earlier/);
+  assert.match(cells[1], /1\.3M/); assert.match(cells[1], /\+12% vs earlier/);
   assert.equal(row.querySelectorAll("svg.spark").length, 2);                                       // one chart per measure
   assert.match(cells[3], /62\.5% \(\+1\.8 pt\)/); assert.match(cells[4], /2\.5 days · tight/);
   assert.match(cells[5], /What changed: GMV rose 12%/); assert.match(cells[5], /Why it matters: Stock covers/); assert.match(cells[5], /What to do: Demand is rising/);
@@ -328,5 +328,42 @@ test("market-intelligence tabs switch panels, and the flat-keyword toggle re-que
   await t.click(t.d.querySelector('nav button[data-tab="health"]'));
   assert.match(text(t.d.querySelector("#health-table .empty")), /import-mi FILE\.csv --type BUYER/);
   const box = t.d.querySelector("#radar-stable"); box.checked = true; box.dispatchEvent(new t.w.Event("change", { bubbles: true })); await settle();
-  assert.ok(t.calls.some((c) => c.path === "/mi/report?include_stable=true"));
+  assert.ok(t.calls.some((c) => c.path === "/mi/report?lang=en&include_stable=true"));
+});
+
+test("language switch: static text, dynamic text, number format and the server request all follow", async () => {
+  const seen = [];
+  const t = boot({ routes: { "GET /mi/report": () => [200, MI] } });
+  const orig = t.w.fetch; t.w.fetch = async (p, o) => { seen.push(p); return orig(p, o); };
+  await t.login();
+  assert.equal(t.d.documentElement.lang, "en"); assert.equal(text(t.d.querySelector("#lang")), "한국어");
+  assert.equal(text(t.d.querySelector('nav button[data-tab="health"]')), "Category health");
+  await t.click(t.d.querySelector("#lang"));
+  assert.equal(t.d.documentElement.lang, "ko"); assert.equal(text(t.d.querySelector("#lang")), "English");
+  assert.equal(text(t.d.querySelector('nav button[data-tab="health"]')), "카테고리 헬스");
+  assert.equal(text(t.d.querySelector('nav button[data-tab="radar"] [data-i18n]')), "트렌드 레이더");
+  assert.match(text(t.d.querySelector("#login-form label")), /이메일/);
+  assert.match(text(t.d.querySelector("#who")), /로그아웃/);
+  assert.ok(seen.includes("/mi/report?lang=ko"));                                                  // narratives are re-requested in Korean
+  const health = [...t.d.querySelector("#health-table tbody tr").children].map(text);
+  assert.match(health[0], /▲ 증가/); assert.match(health[1], /125만/); assert.match(health[1], /\+12% \(이전 대비\)/);
+  assert.match(health[3], /\(\+1\.8%p\)/); assert.match(health[4], /2\.5일 · 빠듯/); assert.match(health[5], /무엇이 바뀌었나: GMV rose 12%/);   // the story text itself comes from the server
+  const radar = [...t.d.querySelectorAll("#radar-table tbody tr")][0];
+  assert.equal(text(radar.children[1]), "◑ 부상"); assert.match(text(radar.children[3]), /프로모션 2 · 미디어 1/);
+  assert.match(text(t.d.querySelector("#summary")), /추적 품목/);
+  assert.match(text(t.d.querySelector("#recs-table tbody tr td.status")), /대기/);                  // status codes are translated, unknown ones fall back
+  assert.match(t.d.querySelector("#matrix-table .star").getAttribute("aria-label"), /관심 품목에 추가/);
+  assert.match(t.d.querySelector("svg.spark").getAttribute("aria-label"), /최근 \d+일/);
+  await t.click(t.d.querySelector("#lang"));                                                       // and back
+  assert.equal(text(t.d.querySelector('nav button[data-tab="health"]')), "Category health"); assert.match(text(t.d.querySelector("#summary")), /items tracked/);
+});
+
+test("the chosen language is remembered and unknown codes fall back to readable text", async () => {
+  const rec = { rec_id: 9, item_name: "Apple", channel_name: "SHOPA", current_price: 1, suggested_price: 2, reason_code: "SOME_NEW_CODE", flags: {}, status: "PENDING" };
+  const t = boot({ routes: { "GET /recommendations": () => [200, { recommendations: [rec] }] } }); await t.login();
+  assert.match(text(t.d.querySelector("#recs-table tbody tr")), /Some new code/);
+  await t.click(t.d.querySelector("#lang"));
+  assert.equal(t.w.localStorage.getItem("mf-lang"), "ko");
+  assert.match(text(t.d.querySelector("#recs-table tbody tr")), /Some new code/);                  // untranslated codes stay readable in Korean mode
+  assert.match(text(t.d.querySelector("#recs-table tbody tr")), /승인/);                            // while the action buttons are translated
 });

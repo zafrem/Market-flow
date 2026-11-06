@@ -1,0 +1,78 @@
+"""English and Korean sentences for the MI narratives. Every key exists in both languages (tests enforce it)."""
+from __future__ import annotations
+
+LANGS = ("en", "ko")
+
+MESSAGES: dict[str, dict[str, str]] = {
+    "en": {
+        "metric.gmv": "GMV", "metric.unitsold": "Units sold", "metric.default": "Demand",
+        "signal.product": "product", "signal.promotion": "promotion", "signal.media": "media", "its_category": "its category",
+        "cat.nodata.changed": "Not enough demand data to tell yet.",
+        "cat.nodata.why": "Import buyer or SKU data (GMV or units sold) for this category.",
+        "cat.nodata.action": "Import demand data.",
+        "cat.steady": "{metric} is steady (within {pct})", "cat.up": "{metric} rose {pct}", "cat.down": "{metric} fell {pct}",
+        "cat.share_up": "; its share of total demand gained {pp} pt", "cat.share_down": "; its share of total demand lost {pp} pt",
+        "cat.lead.LEADS": "Searches have led demand by {lag} period(s) here (r={r}, n={n}), so search is a usable early signal.",
+        "cat.lead.COINCIDENT": "Searches move together with demand (r={r}, n={n}) but do not lead it.",
+        "cat.lead.NOT_VERIFIED": "Search has not been verified as a demand predictor here (best r={r}); read search as interest, not demand.",
+        "cat.lead.INSUFFICIENT": "Too little overlapping search and demand history to test whether search leads demand.",
+        "cat.supply.tight": "Stock covers only {days} days of sales.", "cat.supply.surplus": "Stock covers {days} days of sales.",
+        "cat.action.up_tight": "Demand is rising while stock is tight: secure supply first.",
+        "cat.action.up": "Demand is rising: check purchasing plans and promotion room.",
+        "cat.action.down_surplus": "Demand is falling and stock is high: hold purchases and consider clearing stock.",
+        "cat.action.down": "Demand is falling: review purchasing and promotion plans.",
+        "cat.action.steady": "No action needed on demand.", "cat.action.steady_tight": "Stock is tight; check supply.",
+        "kw.up": "Searches rose {pct} (last {r} periods vs the {r} before).", "kw.down": "Searches fell {pct} (last {r} periods vs the {r} before).",
+        "kw.flat": "Searches held flat (last {r} periods vs the {r} before).",
+        "kw.why.SEED": "Rising from a small base; no product, promotion or media signal confirms it yet.",
+        "kw.why.EMERGING": "Rising from a small base and also showing up in: {signals}.",
+        "kw.why.GROWING": "Rising on already-high volume (top {top}% in {category}).", "kw.why.GROWING_also": "Also seen in: {signals}.",
+        "kw.why.FADING": "Interest is falling.", "kw.why.MAINSTREAM": "High, steady volume: established demand rather than a trend.",
+        "kw.why.STABLE": "No notable change.",
+        "kw.lead": "Search has led demand in this category, so this is a credible early signal.",
+        "kw.unverified": "This measures interest, not demand: search is not verified as a demand predictor in this category.",
+        "kw.action.SEED": "Watch: keep it on the radar and re-check next period.",
+        "kw.action.EMERGING": "Review assortment: check whether we carry it or can source it.",
+        "kw.action.GROWING": "Check supply and pricing before demand arrives.", "kw.action.GROWING_tight": "Category stock is already tight.",
+        "kw.action.FADING": "Avoid new purchase commitments; review promotion plans.",
+        "kw.action.MAINSTREAM": "Keep availability; this is core demand.", "kw.action.STABLE": "No action.",
+    },
+    "ko": {
+        "metric.gmv": "GMV", "metric.unitsold": "판매수량", "metric.default": "수요",
+        "signal.product": "상품", "signal.promotion": "프로모션", "signal.media": "미디어", "its_category": "해당 카테고리",
+        "cat.nodata.changed": "아직 수요 데이터가 부족해 판단할 수 없습니다.",
+        "cat.nodata.why": "이 카테고리의 구매자 또는 SKU 데이터(GMV 또는 판매수량)를 가져오세요.",
+        "cat.nodata.action": "수요 데이터를 가져오세요.",
+        "cat.steady": "{metric}은(는) 보합입니다(±{pct} 이내)", "cat.up": "{metric}이(가) {pct} 증가했습니다", "cat.down": "{metric}이(가) {pct} 감소했습니다",
+        "cat.share_up": "; 전체 수요 대비 비중이 {pp}%p 늘었습니다", "cat.share_down": "; 전체 수요 대비 비중이 {pp}%p 줄었습니다",
+        "cat.lead.LEADS": "이 카테고리에서는 검색이 수요를 {lag}기간 앞섰습니다(r={r}, n={n}). 검색을 조기 신호로 쓸 수 있습니다.",
+        "cat.lead.COINCIDENT": "검색과 수요가 함께 움직이지만(r={r}, n={n}) 검색이 수요를 앞서지는 않습니다.",
+        "cat.lead.NOT_VERIFIED": "이 카테고리에서는 검색이 수요 예측 지표로 검증되지 않았습니다(최고 r={r}). 검색은 수요가 아니라 관심으로 읽으세요.",
+        "cat.lead.INSUFFICIENT": "검색이 수요를 앞서는지 검정하기에는 검색과 수요가 겹치는 기록이 너무 적습니다.",
+        "cat.supply.tight": "재고는 판매 {days}일치뿐입니다.", "cat.supply.surplus": "재고가 판매 {days}일치입니다.",
+        "cat.action.up_tight": "수요는 늘고 재고는 빠듯합니다. 공급 확보가 우선입니다.",
+        "cat.action.up": "수요가 늘고 있습니다. 발주 계획과 프로모션 여력을 확인하세요.",
+        "cat.action.down_surplus": "수요는 줄고 재고는 많습니다. 발주를 보류하고 재고 소진을 검토하세요.",
+        "cat.action.down": "수요가 줄고 있습니다. 발주와 프로모션 계획을 점검하세요.",
+        "cat.action.steady": "수요 측면에서 조치할 것은 없습니다.", "cat.action.steady_tight": "재고가 빠듯하니 공급을 확인하세요.",
+        "kw.up": "검색이 {pct} 늘었습니다(최근 {r}기간, 직전 {r}기간 대비).", "kw.down": "검색이 {pct} 줄었습니다(최근 {r}기간, 직전 {r}기간 대비).",
+        "kw.flat": "검색이 보합입니다(최근 {r}기간, 직전 {r}기간 대비).",
+        "kw.why.SEED": "작은 규모에서 오르는 중이며, 아직 상품·프로모션·미디어 신호로 확인되지 않았습니다.",
+        "kw.why.EMERGING": "작은 규모에서 오르는 중이며 다음 신호에서도 나타납니다: {signals}.",
+        "kw.why.GROWING": "이미 검색량이 높은 상태에서 오르고 있습니다({category} 상위 {top}%).", "kw.why.GROWING_also": "다음 신호에서도 보입니다: {signals}.",
+        "kw.why.FADING": "관심이 줄고 있습니다.", "kw.why.MAINSTREAM": "검색량이 높고 안정적입니다. 트렌드가 아니라 자리 잡은 수요입니다.",
+        "kw.why.STABLE": "눈에 띄는 변화가 없습니다.",
+        "kw.lead": "이 카테고리에서는 검색이 수요를 앞서왔으므로 믿을 만한 조기 신호입니다.",
+        "kw.unverified": "이는 수요가 아니라 관심을 나타냅니다. 이 카테고리에서는 검색이 수요 예측 지표로 검증되지 않았습니다.",
+        "kw.action.SEED": "관찰: 레이더에 두고 다음 기간에 다시 확인하세요.",
+        "kw.action.EMERGING": "상품 구성 검토: 취급 중인지, 소싱할 수 있는지 확인하세요.",
+        "kw.action.GROWING": "수요가 오기 전에 공급과 가격을 점검하세요.", "kw.action.GROWING_tight": "카테고리 재고가 이미 빠듯합니다.",
+        "kw.action.FADING": "신규 발주 확정을 피하고 프로모션 계획을 점검하세요.",
+        "kw.action.MAINSTREAM": "재고를 유지하세요. 핵심 수요입니다.", "kw.action.STABLE": "조치 없음.",
+    },
+}
+
+
+def msg(lang: str, key: str, **params) -> str:
+    table = MESSAGES.get(lang) or MESSAGES["en"]
+    return table[key].format(**params)

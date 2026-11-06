@@ -233,9 +233,9 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
 
     # ---- market intelligence (no cost data; filtered to the caller's categories) ---------------------------------------
     @app.get("/mi/report")
-    def mi(include_stable: bool = False, user: CurrentUser = Depends(current_user)):
+    def mi(include_stable: bool = False, lang: Literal["en", "ko"] = "en", user: CurrentUser = Depends(current_user)):
         allowed = None if user.scope is None else {l for l, _ in user.scope}
-        return mi_report(mi_store, settings, allowed, include_stable)
+        return mi_report(mi_store, settings, allowed, include_stable, lang)
 
     @app.post("/mi/import")
     async def mi_import(request: Request, signal_type: str, source: str = "", admin: CurrentUser = Depends(require_admin)):

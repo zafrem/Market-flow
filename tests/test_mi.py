@@ -216,3 +216,22 @@ def test_volume_rank_needs_three_peers_so_a_lone_keyword_is_never_called_growing
     rows = [obs("SEARCH", w, "Fruit", k, "searches", v) for k, vals in {"a": [100, 100, 100, 200, 200, 300], "b": [50] * 6}.items() for w, v in zip(WEEKS, vals)]
     got = {r["keyword"]: (r["stage"], r["volume_percentile"]) for r in trend_radar(rows, [], MiConfig(), include_stable=True)}
     assert got == {"a": ("SEED", None), "b": ("STABLE", None)}
+
+
+def test_every_message_exists_in_both_languages_with_the_same_placeholders():
+    import string
+    from marketflow.mi.messages import MESSAGES
+    assert set(MESSAGES["en"]) == set(MESSAGES["ko"])
+    fields = lambda t: {f for _, f, _, _ in string.Formatter().parse(t) if f}       # noqa: E731
+    for k in MESSAGES["en"]:
+        assert fields(MESSAGES["en"][k]) == fields(MESSAGES["ko"][k]), k
+
+
+def test_narratives_come_out_in_korean_on_request():
+    rows = radar_rows([obs("PROMOTION", WEEKS[-1], "Fruit", "emerger", "count", 2)] + [obs("BUYER", w, "Fruit", "", "gmv", 1000 + 100 * i) for i, w in enumerate(WEEKS)])
+    health = category_health(rows, {"Fruit": {"stock": 10, "daily": 10}}, MiConfig(), "ko")
+    assert "GMV이(가)" in health[0]["changed"] and "증가했습니다" in health[0]["changed"] and "재고는 판매 1.0일치뿐입니다" in health[0]["why"]
+    emerger = next(r for r in trend_radar(rows, health, MiConfig(), lang="ko") if r["keyword"] == "emerger")
+    assert "프로모션" in emerger["why"] and emerger["action"].startswith("상품 구성 검토") and "검색이" in emerger["changed"]
+    en = next(r for r in trend_radar(rows, health, MiConfig()) if r["keyword"] == "emerger")
+    assert "promotion" in en["why"] and en["action"].startswith("Review assortment")

@@ -35,6 +35,8 @@ header { display: flex; justify-content: space-between; align-items: center; gap
 .brand svg { width: 30px; height: 30px; }
 .brand .tag { fill: var(--brand); } .brand .hole { fill: var(--surface); } .brand .stroke { stroke: var(--brand-ink); }
 h1 { font-size: 19px; font-weight: 700; letter-spacing: -.01em; margin: 0; }
+#lang { padding: 4px 10px; font-size: 13px; }
+.hdr-right { display: flex; align-items: center; gap: 14px; }
 #who { display: flex; align-items: center; gap: 10px; color: var(--ink-2); }
 #who button { padding: 4px 10px; font-size: 13px; }
 main { padding: 24px 28px 48px; max-width: 1360px; margin: 0 auto; }
