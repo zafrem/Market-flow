@@ -31,6 +31,7 @@ function boot({ role = "MD", routes = {} } = {}) {
       { cand_id: 3, platform: "SHOPA", status: "PENDING", selectors: { item: "article.card", fields: { title: { css: "h3" }, sale_price: { css: "b" } } } },
       { cand_id: 2, platform: "SHOPA", status: "APPROVED", selectors: { item: "li.old", fields: { title: { css: "a" }, sale_price: { css: "i" } } } }] }],
     "GET /mi/report": () => [200, { health: [], radar: [], as_of: null, signals: [] }],
+    "GET /crawlers": () => [200, { crawlers: [] }],
     ...routes,
   };
   const dom = new JSDOM(html, { runScripts: "outside-only", url: "http://localhost/" });
@@ -366,4 +367,72 @@ test("the chosen language is remembered and unknown codes fall back to readable 
   assert.equal(t.w.localStorage.getItem("mf-lang"), "ko");
   assert.match(text(t.d.querySelector("#recs-table tbody tr")), /Some new code/);                  // untranslated codes stay readable in Korean mode
   assert.match(text(t.d.querySelector("#recs-table tbody tr")), /승인/);                            // while the action buttons are translated
+});
+
+const CRAWLERS = [
+  { id: "report", kind: "inbox", state: "HEALTHY", enabled: true, times: ["07:30"], not_configured: null, data_as_of: "2026-10-26", last_run: { status: "OK" } },
+  { id: "news", kind: "news", state: "NOT_CONFIGURED", enabled: true, times: ["07:00", "12:00"], not_configured: "Add at least one RSS/Atom feed URL in the settings.", data_as_of: null, last_run: null },
+  { id: "competitor", kind: "competitor", state: "FAILING", enabled: true, times: ["08:00"], not_configured: null, data_as_of: "2026-11-03", last_run: { status: "FAILED" } }];
+const DETAIL = {
+  report: { ...CRAWLERS[0], fields: [], config: {}, default_times: ["07:30"], last_success: "2026-11-02T22:30:00Z", inbox: { path: "/data/inbox/report", pending: ["w44.csv"] },
+    runs: [{ run_id: 3, trigger_kind: "SCHEDULED", status: "OK", queued_at: "2026-11-02T22:30:00Z", started_at: "2026-11-02T22:30:00Z", finished_at: "2026-11-02T22:30:05Z", stored: 12, message: "1 file(s), 12 value(s) loaded <b>x</b>" },
+           { run_id: 2, trigger_kind: "MANUAL", status: "FAILED", queued_at: "2026-11-01T22:30:00Z", started_at: null, finished_at: "2026-11-01T22:30:05Z", stored: 0, message: "bad.csv: no period column" }] },
+  news: { ...CRAWLERS[1], fields: [{ key: "feeds", kind: "lines", max: 20 }, { key: "extra_keywords", kind: "lines", max: 100 }, { key: "lookback_days", kind: "int", max: 60 }],
+    config: { feeds: ["https://n.example/rss"], extra_keywords: [], lookback_days: 14 }, default_times: ["07:00"], last_success: null, runs: [] },
+};
+const crawlerRoutes = (calls = []) => ({
+  "GET /crawlers": () => [200, { crawlers: CRAWLERS }],
+  "GET /crawlers/report": () => [200, DETAIL.report], "GET /crawlers/news": () => [200, DETAIL.news],
+  "PUT /crawlers/news": () => [200, DETAIL.news], "POST /crawlers/report/run": () => [202, { run_id: 9, status: "QUEUED" }],
+  "POST /crawlers/report/upload": () => [200, { status: "OK", stored: 3, message: "1 file(s), 3 value(s) loaded" }],
+});
+
+test("each crawler has its own page with status, settings, inbox and run history (message text escaped)", async () => {
+  const t = boot({ role: "ADMIN", routes: crawlerRoutes() }); await t.login();
+  const items = [...t.d.querySelectorAll("#crawler-list button")].map(text);
+  assert.deepEqual(items, ["Search report● Healthy", "News○ Needs setup", "Competitor prices✖ Failing"]);
+  assert.equal(text(t.d.querySelector('nav button[data-tab="crawlers"] .badge')), "1");                 // one failing crawler
+  const page = t.d.querySelector("#crawler-page");
+  assert.match(text(page.querySelector("h2")), /Search report/); assert.match(text(page), /\/data\/inbox\/report/); assert.match(text(page), /w44\.csv/);
+  const rows = [...page.querySelectorAll("tbody tr")];
+  assert.equal(rows.length, 2); assert.match(text(rows[0]), /Scheduled.*OK.*12.*1 file\(s\), 12 value\(s\) loaded <b>x<\/b>/); assert.equal(page.querySelectorAll("tbody b").length, 0);
+  assert.match(text(rows[1]), /Manual.*Failed.*bad\.csv/);
+  await t.click(t.d.querySelectorAll("#crawler-list button")[1]);
+  assert.equal(t.w.location.hash, "#/crawlers/news");                                                   // a bookmarkable page per crawler
+  assert.match(text(page.querySelector("h2")), /News/); assert.match(text(page), /Add at least one RSS\/Atom feed URL under Settings/);
+  assert.equal(page.querySelector("textarea").value, "https://n.example/rss"); assert.equal(page.querySelector('input[type=number]').value, "14");
+  assert.equal(page.querySelector('input[type=text]').value, "07:00, 12:00"); assert.match(text(page), /No runs yet/);
+});
+
+test("admin saves schedule and settings, queues a run and uploads a file; MD only reads", async () => {
+  const t = boot({ role: "ADMIN", routes: crawlerRoutes() }); await t.login();
+  await t.click(t.d.querySelectorAll("#crawler-list button")[1]);
+  const page = t.d.querySelector("#crawler-page");
+  page.querySelector('input[type=text]').value = "06:00, 18:30"; page.querySelector("textarea").value = "https://a.example/rss\n\n https://b.example/rss ";
+  page.querySelector("form").dispatchEvent(new t.w.Event("submit", { cancelable: true, bubbles: true })); await settle();
+  const put = t.calls.find((c) => c.method === "PUT" && c.path === "/crawlers/news");
+  assert.deepEqual(JSON.parse(put.body), { times: ["06:00", "18:30"], config: { feeds: ["https://a.example/rss", "https://b.example/rss"], extra_keywords: [], lookback_days: 14 } });
+  await t.click(t.d.querySelectorAll("#crawler-list button")[0]);
+  await t.click([...t.d.querySelectorAll("#crawler-page button")].find((b) => text(b) === "Run now"));
+  assert.ok(t.calls.some((c) => c.method === "POST" && c.path === "/crawlers/report/run")); assert.match(text(t.d.querySelector("#toast")), /Run queued/);
+  const file = t.d.querySelector('#crawler-page input[type=file]');
+  Object.defineProperty(file, "files", { value: [{ name: "w44 report.csv", arrayBuffer: async () => new ArrayBuffer(4) }] });
+  await t.click([...t.d.querySelectorAll("#crawler-page button")].find((b) => text(b) === "Upload file"));
+  const up = t.calls.find((c) => c.path.startsWith("/crawlers/report/upload"));
+  assert.equal(up.path, "/crawlers/report/upload?filename=w44%20report.csv"); assert.ok(up.body instanceof t.w.ArrayBuffer || up.body.byteLength === 4);
+  assert.match(text(t.d.querySelector("#toast")), /Imported: 1 file\(s\), 3 value\(s\) loaded/);
+  const md = boot({ role: "MD", routes: crawlerRoutes() }); await md.login();
+  const mdPage = md.d.querySelector("#crawler-page");
+  assert.equal(mdPage.querySelectorAll("button").length, 0); assert.equal(mdPage.querySelector('input[type=checkbox]').disabled, true);
+  assert.match(text(mdPage), /Only administrators can change crawler settings/);
+});
+
+test("crawler pages follow the language switch and deep links open the right page", async () => {
+  const t = boot({ role: "ADMIN", routes: crawlerRoutes() });
+  t.w.location.hash = "#/crawlers/news"; await t.login();
+  assert.equal(t.d.querySelector("#crawlers").hidden, false); assert.match(text(t.d.querySelector("#crawler-page h2")), /News/);
+  await t.click(t.d.querySelector("#lang"));
+  assert.deepEqual([...t.d.querySelectorAll("#crawler-list button")].map(text), ["검색 리포트● 정상", "뉴스○ 설정 필요", "경쟁사 가격✖ 실패 중"]);
+  assert.match(text(t.d.querySelector("#crawler-page")), /설정에서 RSS\/Atom 피드 주소를 하나 이상 추가하세요/);
+  assert.match(text(t.d.querySelector('nav button[data-tab="crawlers"]')), /크롤러/);
 });

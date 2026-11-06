@@ -15,3 +15,15 @@ def next_run(now: datetime, times: list[time]) -> datetime:
             if cand > local:
                 return cand.astimezone(timezone.utc)
     raise ValueError("no times given")
+
+
+def latest_slot(now: datetime, times: list[time]) -> datetime | None:
+    """Most recent KST wall-clock occurrence (at or before `now`) of any of `times`, as UTC; None if no times."""
+    local = now.astimezone(KST)
+    best = None
+    for day_offset in (0, -1):
+        for t in times:
+            cand = datetime.combine(local.date() + timedelta(days=day_offset), t, tzinfo=KST)
+            if cand <= local and (best is None or cand > best):
+                best = cand
+    return best.astimezone(timezone.utc) if best else None

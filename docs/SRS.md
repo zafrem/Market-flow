@@ -247,6 +247,13 @@ Implemented per `docs/MI_FRAMEWORK.md`. Demand and interest signals (SEARCH, BUY
 * **F-06-2 (Trend Radar):** per keyword, a lifecycle stage (SEED / EMERGING / GROWING / MAINSTREAM / FADING) from search growth, volume percentile among at least three peers in its category, and corroboration by PRODUCT / PROMOTION / MEDIA mentions; a weighted score (weights configurable in `[mi.weights]`) and an opportunity score (score × (1 − volume percentile)).
 * **F-06-3 (Presentation and access):** every row carries "what changed / why it matters / what to do". Users see only their assigned `category_l` values; rows without a category are admin-only; no cost data is involved.
 
+### F-07: Crawler Management
+One crawler per data item (`report`, `buyer`, `news`, `competitor`, `flyer`, `newproduct`, `benchmark_kamis`, `benchmark_garak`), each with its own management page.
+* **F-07-1 (Per-crawler schedule and settings):** enabled flag, KST run times (up to 12) and crawler-specific settings (news: feed URLs, extra keywords, look-back days) are stored in `crawler_settings` and take effect without a restart. Feed URLs must be http(s) and are never loopback/private/link-local addresses. Only ADMIN may change them; MD may view.
+* **F-07-2 (Run history and health):** every run is recorded in `crawler_runs` (trigger, status QUEUED/RUNNING/OK/FAILED/SKIPPED, rows, message). A crawler never runs twice at once (compare-and-set claim); a RUNNING row older than 2h is marked failed. A slot missed by more than 6h is skipped. Failures raise a de-duplicated `CRAWLER_FAILED` alert.
+* **F-07-3 (File inbox):** crawlers whose source has no API import CSV/XLSX files from `inbox/<id>/` (or an admin upload, 5 MB), filing each into `processed/` or `failed/`; client file names are never used on disk.
+* **F-07-4 (News):** counts articles per ISO week that mention each tracked keyword (latest search keywords plus extras); counts only ever grow so a rolling feed window cannot erase history.
+
 ---
 
 ## 5. Non-Functional & Operational Requirements

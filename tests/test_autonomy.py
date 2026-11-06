@@ -19,6 +19,9 @@ from marketflow.time_provider import FixedTimeProvider
 from marketflow.transport import FixtureTransport
 from marketflow.web.app import create_app
 from marketflow.web.security import hash_password
+from marketflow.crawlers.base import to_time
+from marketflow.crawlers.service import CrawlerService
+from marketflow.schedule import next_run
 from marketflow.worker import build_scheduler, run_retail
 
 START = datetime(2026, 11, 2, 20, 0, tzinfo=timezone.utc)            # 2026-11-03 05:00 KST
@@ -63,8 +66,29 @@ def world(tmp_path, isolated_rules):
     def make(html, llm=None, kamis=None):
         tr = FixtureTransport({"kamis.or.kr": kamis or FIX / "kamis_daily.json", "shop-a.example": html})
         notifier = Notifier(HOOK, repo, tp, post=hook, sleep=sleep)
-        return build_scheduler(e, s, tr, tp, llm or MockLLM(LLM_ITEMS), notifier, sleep=sleep), tr
+        llm = llm or MockLLM(LLM_ITEMS)
+        sched = build_scheduler(e, s, tp, notifier, sleep=sleep)
+        svc = CrawlerService(e, s, tp, tr, lambda: llm, notifier)
+        for cid in svc.registry:                                          # this day only exercises the price crawlers
+            if cid not in {"benchmark_kamis", "competitor"}:
+                svc.update(cid, "test", False, None, None)
+        return Day(sched, svc, tp), tr
     return type("W", (), dict(e=e, s=s, tp=tp, repo=repo, hook=hook, make=staticmethod(make), rules=isolated_rules, tmp=tmp_path))
+
+
+class Day:
+    """The worker's two loops on one simulated clock: fixed-time jobs (decide) and per-crawler schedules."""
+    def __init__(self, sched, svc, tp):
+        self.sched, self.svc, self.tp = sched, svc, tp
+
+    async def step(self):
+        sched_when, _ = self.sched.next_due()
+        crawler_when = min(next_run(self.tp.now(), [to_time(t) for t in self.svc.effective(c)["times"]])
+                           for c in self.svc.registry.values() if self.svc.effective(c)["enabled"])
+        if crawler_when <= sched_when:
+            self.tp.set(crawler_when)
+            return await self.svc.dispatch_once()
+        return await self.sched.step()
 
 
 def count(w, table):
@@ -75,7 +99,7 @@ def count(w, table):
 async def test_simulated_day_runs_everything_unattended(world):
     sch, tr = world.make(ORIGINAL)
     ran = [await sch.step() for _ in range(8)]
-    assert ran == [["benchmarks"], ["retail"], ["decide"], ["benchmarks"], ["retail"], ["decide"], ["retail"], ["decide"]]
+    assert ran == [["benchmark_kamis"], ["competitor"], ["decide"], ["benchmark_kamis"], ["competitor"], ["decide"], ["competitor"], ["decide"]]
     assert count(world, "ext_public_benchmarks") == 2                  # KAMIS apple+onion, idempotent across 2 runs
     assert count(world, "ext_retail_prices") == 6                      # 3 scrapes x 2 matched listings (append-only snapshots)
     recs = world.repo.list_recommendations()
@@ -104,14 +128,14 @@ async def test_failed_job_raises_alert_and_day_continues(world):
             raise ConnectionError("shop down")
         return await original_get(url, params)
     tr.get_text = flaky
-    await sch.step(); await sch.step(); await sch.step()               # benchmarks, retail (fails), decide
+    await sch.step(); await sch.step(); await sch.step()               # kamis, competitor (fails), decide
     assert any("Retail scrape SHOPA failed (ConnectionError)" in t for t in world.hook.posts)
     assert count(world, "ext_public_benchmarks") == 2 and world.repo.list_recommendations()
 
 
 async def test_selector_fault_heals_via_llm_and_candidate_waits_for_a_human(world):
     sch, _ = world.make(MUTATED)
-    await sch.step(); await sch.step()                                  # benchmarks, retail on a redesigned page
+    await sch.step(); await sch.step()                                  # kamis, competitor on a redesigned page
     with world.e.connect() as c:
         assert c.execute(text("SELECT DISTINCT extraction_source FROM ext_retail_prices")).scalars().all() == ["LLM"]
     cands = world.repo.list_candidates()
@@ -131,7 +155,7 @@ async def test_repeated_selector_fault_escalates_once_per_window(world):
     broken = "<html><body><p>maintenance</p></body></html>"             # LLM also finds nothing -> ScrapeExtractionFault
     sch, _ = world.make(broken, llm=MockLLM())
     for _ in range(3):                                                  # faults accumulate across scheduled retail runs
-        while "retail" not in await sch.step():
+        while "competitor" not in await sch.step():
             pass
     assert sum("ESCALATE" in t for t in world.hook.posts) == 1
 

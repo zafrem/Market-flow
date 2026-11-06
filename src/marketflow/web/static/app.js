@@ -5,7 +5,8 @@ const el = (tag, text, cls) => { const e = document.createElement(tag); if (text
 const won = (v) => (v === null || v === undefined) ? "–" : Number(v).toLocaleString("ko-KR");
 
 async function api(path, opts = {}) {
-  const r = await fetch(path, { ...opts, headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) } });
+  const { raw, ...init } = opts;                                        // raw: a file body, sent as-is instead of JSON
+  const r = await fetch(path, { ...init, headers: { "Content-Type": raw ? "text/csv" : "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) } });
   if (r.status === 401 && token) { signOut(); throw new Error(t("session_expired")); }
   const body = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(body.detail || r.statusText);
@@ -86,13 +87,13 @@ function setBadge(tab, n) {
 
 function toast(msg) { $("#toast").textContent = msg || ""; }
 
-function signOut() { token = me = null; lastRows = []; miReport = null; pendingCount = null; tip().hidden = true; $("#app").hidden = true; $("#login").hidden = false; $("#who").textContent = ""; }
+function signOut() { token = me = null; lastRows = []; miReport = null; crawlerId = null; pendingCount = null; tip().hidden = true; $("#app").hidden = true; $("#login").hidden = false; $("#who").textContent = ""; }
 function renderWho() {
   if (!me) return;
   const out = el("button", t("signout")); out.onclick = signOut;
   $("#who").replaceChildren(document.createTextNode(me.name + " · " + me.role + "  "), out);
 }
-const reloadAll = () => Promise.all([loadMatrix(), loadMi(), loadRecs(), ...(me.role === "BUYER" ? [] : [loadReview(), loadSelectors()])]);
+const reloadAll = () => Promise.all([loadMatrix(), loadMi(), loadRecs(), ...(me.role === "BUYER" ? [] : [loadReview(), loadSelectors(), loadCrawlers()])]);
 function setLang(l) {
   lang = l;
   try { localStorage.setItem("mf-lang", l); } catch (e) { /* storage blocked: the choice lasts until reload */ }
@@ -114,12 +115,14 @@ $("#login-form").addEventListener("submit", async (ev) => {
     toast("");
     watch = new Set((await api("/watchlist")).std_item_ids);
     await reloadAll();
+    await routeCrawler();                                              // a deep link like #/crawlers/news opens that page after sign-in
   } catch (e) { $("#login-error").textContent = e.message; }
 });
 
 document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => {
   document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("active", x === b));
-  for (const id of ["matrix", "health", "radar", "recs", "review", "selectors"]) $("#" + id).hidden = b.dataset.tab !== id;
+  for (const id of ["matrix", "health", "radar", "crawlers", "recs", "review", "selectors"]) $("#" + id).hidden = b.dataset.tab !== id;
+  if (b.dataset.tab === "crawlers" && crawlerId) history.replaceState(null, "", "#/crawlers/" + crawlerId);
 }));
 $("#only-watch").addEventListener("change", loadMatrix);
 $("#radar-stable").addEventListener("change", loadMi);
@@ -273,3 +276,127 @@ $("#export-applied").addEventListener("click", async () => {
     const a = el("a"); a.href = url; a.download = "price-changes.csv"; document.body.append(a); a.click(); a.remove(); URL.revokeObjectURL(url);
   } catch (e) { toast(e.message); }
 });
+
+
+// ---- crawlers: one management page per crawler (#/crawlers/<id>) ----------------------------------------------------------
+let crawlerId = null, crawlerList = [];
+const isAdmin = () => me && me.role === "ADMIN";
+const when = (iso) => iso ? new Date(iso).toLocaleString(numLocale(), { timeZone: "Asia/Seoul", dateStyle: "short", timeStyle: "short" }) + " KST" : t("c.never");
+const crawlerTitle = (id) => t("crawler." + id + ".title");
+
+function showTab(tab) {
+  document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("active", x.dataset.tab === tab));
+  for (const id of ["matrix", "health", "radar", "crawlers", "recs", "review", "selectors"]) $("#" + id).hidden = tab !== id;
+}
+function gotoCrawler(id) { location.hash = "#/crawlers/" + id; }
+window.addEventListener("hashchange", () => { if (token && me.role !== "BUYER") routeCrawler(); });
+
+async function routeCrawler() {
+  const m = /^#\/crawlers\/([a-z_]+)$/.exec(location.hash);
+  if (!m) return;
+  showTab("crawlers");
+  await openCrawler(m[1]);
+}
+
+async function loadCrawlers() {
+  ({ crawlers: crawlerList } = await api("/crawlers"));
+  setBadge("crawlers", crawlerList.filter((c) => c.state === "FAILING").length);
+  renderCrawlerList();
+  const m = /^#\/crawlers\/([a-z_]+)$/.exec(location.hash);
+  const id = (m && crawlerList.some((c) => c.id === m[1]) ? m[1] : null) || crawlerId || crawlerList[0]?.id;
+  if (id) await openCrawler(id, true);
+}
+
+function renderCrawlerList() {
+  $("#crawler-list").replaceChildren(...crawlerList.map((c) => {
+    const li = el("li"), b = el("button", "", c.id === crawlerId ? "active" : "");
+    b.append(el("b", crawlerTitle(c.id)), el("small", t("cstate." + c.state)));
+    b.onclick = () => gotoCrawler(c.id); li.append(b); return li;
+  }));
+}
+
+async function openCrawler(id, quiet) {
+  crawlerId = id;
+  renderCrawlerList();
+  try { renderCrawlerPage(await api("/crawlers/" + id)); } catch (e) { toast(e.message); }
+}
+
+function fact(dl, label, value) { dl.append(el("dt", label), el("dd", value)); }
+
+function renderCrawlerPage(d) {
+  const page = $("#crawler-page"), admin = isAdmin();
+  const h = el("h2", crawlerTitle(d.id)), desc = el("p", t("crawler." + d.id + ".desc"), "hint");
+  const dl = el("dl", "", "facts");
+  fact(dl, t("c.status"), t("cstate." + d.state));
+  if (d.state === "NOT_CONFIGURED" && d.not_configured) fact(dl, "", t("crawler.setup." + d.id));
+  fact(dl, t("c.last_run"), d.last_run ? when(d.last_run.finished_at || d.last_run.queued_at) + " · " + codeText(d.last_run.status) : t("c.never"));
+  fact(dl, t("c.last_ok"), when(d.last_success));
+  fact(dl, t("c.data_as_of"), d.data_as_of || t("c.never"));
+  if (d.inbox) { fact(dl, t("c.inbox"), d.inbox.path); fact(dl, t("c.pending"), d.inbox.pending.length ? d.inbox.pending.join(", ") : t("c.none")); }
+  if (d.platforms) fact(dl, t("c.platforms"), Object.entries(d.platforms).map(([p, v]) => p + " (" + t("c.urls", { n: v.urls }) + (v.legal_review ? ", " + t("c.legal") + " ✓" : "") + ")").join(" · ") || t("c.none"));
+  page.replaceChildren(h, desc, dl);
+
+  const actions = el("div", "", "row");
+  const enabled = el("input"); enabled.type = "checkbox"; enabled.checked = d.enabled; enabled.disabled = !admin;
+  const lab = el("label", "", "inline"); lab.append(enabled, document.createTextNode(" " + t("c.enabled")));
+  enabled.addEventListener("change", () => saveCrawler(d.id, { enabled: enabled.checked }));
+  actions.append(lab);
+  if (admin) {
+    const run = el("button", t("c.run_now"));
+    run.onclick = async () => { try { await api("/crawlers/" + d.id + "/run", { method: "POST" }); toast(""); await openCrawler(d.id); await loadCrawlers(); toast(t("c.queued")); } catch (e) { toast(e.message); } };
+    actions.append(run);
+    if (d.inbox) {
+      const file = el("input"); file.type = "file"; file.accept = ".csv,.xlsx"; file.setAttribute("aria-label", t("c.upload"));
+      const up = el("button", t("c.upload"));
+      up.onclick = async () => {
+        const f = file.files[0]; if (!f) return;
+        try {
+          const res = await api("/crawlers/" + d.id + "/upload?filename=" + encodeURIComponent(f.name), { method: "POST", raw: true, body: await f.arrayBuffer() });
+          toast(t("c.uploaded", { message: res.message })); await loadCrawlers();
+        } catch (e) { toast(e.message); }
+      };
+      actions.append(file, up);
+    }
+  } else page.append(el("p", t("c.read_only"), "note"));
+  page.append(actions);
+  if (d.inbox && admin) page.append(el("p", t("c.upload_hint"), "note"));
+
+  // settings
+  page.append(el("h3", t("c.settings")));
+  const form = el("form"), times = el("input"); times.type = "text"; times.value = d.times.join(", "); times.disabled = !admin; times.setAttribute("aria-label", t("c.schedule"));
+  const tl = el("label", t("c.schedule")); tl.append(times); form.append(tl);
+  const inputs = {};
+  for (const f of d.fields) {
+    const l = el("label", t("field." + f.key)); let inp;
+    if (f.kind === "lines") { inp = el("textarea"); inp.value = (d.config[f.key] || []).join("\n"); }
+    else { inp = el("input"); inp.type = "number"; inp.min = 1; inp.max = f.max; inp.value = d.config[f.key]; }
+    inp.disabled = !admin; inputs[f.key] = [f, inp]; l.append(inp); form.append(l);
+  }
+  if (admin) { const save = el("button", t("c.save")); save.type = "submit"; form.append(save); }
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const config = {};
+    for (const [k, [f, inp]] of Object.entries(inputs)) config[k] = f.kind === "lines" ? inp.value.split("\n").map((x) => x.trim()).filter(Boolean) : Number(inp.value);
+    saveCrawler(d.id, { times: times.value.split(",").map((x) => x.trim()).filter(Boolean), ...(d.fields.length ? { config } : {}) });
+  });
+  page.append(form);
+
+  // history
+  page.append(el("h3", t("c.history")));
+  if (!d.runs.length) { page.append(el("p", t("c.no_history"), "note")); return; }
+  const table = el("table"), head = el("tr");
+  for (const k of ["when", "trigger", "status", "rows", "message"]) head.append(el("th", t("c.h." + k), k === "rows" ? "r" : ""));
+  const thead = el("thead"); thead.append(head); const tbody = el("tbody");
+  for (const r of d.runs) {
+    const tr = el("tr");
+    tr.append(el("td", when(r.finished_at || r.started_at || r.queued_at)), el("td", t("trigger." + r.trigger_kind)),
+      el("td", codeText(r.status), "status " + ({ OK: "green", FAILED: "red", SKIPPED: "amber" }[r.status] || "")), el("td", r.stored, "num"), el("td", r.message));
+    tbody.append(tr);
+  }
+  table.append(thead, tbody); const wrap = el("div", "", "scroll"); wrap.append(table); page.append(wrap);
+}
+
+async function saveCrawler(id, patch) {
+  try { await api("/crawlers/" + id, { method: "PUT", body: JSON.stringify(patch) }); toast(t("c.saved")); await loadCrawlers(); }
+  catch (e) { toast(e.message); await openCrawler(id); }
+}

@@ -16,6 +16,8 @@ from .. import curation
 from ..db import init_sqlite, make_engine
 from ..decision import service
 from ..decision.service import Actor, WorkflowError
+from ..crawlers.adapters import InboxCrawler
+from ..crawlers.service import CrawlerService
 from ..mi.importer import import_signals
 from ..mi.service import mi_report
 from ..mi.store import MiStore
@@ -57,6 +59,12 @@ class AssignmentIn(BaseModel):
     category_m: str = Field(default="", max_length=50)
 
 
+class CrawlerPatch(BaseModel):
+    enabled: bool | None = None
+    times: list[str] | None = Field(default=None, max_length=12)
+    config: dict[str, Any] | None = None
+
+
 class UserPatch(BaseModel):
     active: bool | None = None
     role: Role | None = None
@@ -93,6 +101,7 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
         init_sqlite(engine)
     repo = AppRepository(engine)
     mi_store = MiStore(engine)
+    crawlers = CrawlerService(engine, settings, tp)          # no transport: the API never crawls, it edits settings, queues runs and takes uploads
     throttle = LoginThrottle()
     app = FastAPI(title="MarketFlow", docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -259,6 +268,67 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
         repo.audit(admin.email, "MI_IMPORT", None, {"signal_type": signal_type.upper(), "loaded": res.loaded, "errors": len(res.errors)}, now())
         return {"loaded": res.loaded, "errors": [{"line": e.line, "field": e.field, "message": e.message} for e in res.errors[:50]],
                 "error_count": len(res.errors)}
+
+    # ---- crawlers: one per data item, each with its own settings, schedule and run history --------------------------------
+    def crawler_or_404(cid: str):
+        if cid not in crawlers.registry:
+            raise HTTPException(404, "crawler not found")
+        return crawlers.registry[cid]
+
+    @app.get("/crawlers")
+    def list_crawlers(_: CurrentUser = Depends(require_decider)):
+        return {"crawlers": crawlers.list()}
+
+    @app.get("/crawlers/{cid}")
+    def crawler_detail(cid: str, _: CurrentUser = Depends(require_decider)):
+        crawler_or_404(cid)
+        return crawlers.detail(cid)
+
+    @app.put("/crawlers/{cid}")
+    def update_crawler(cid: str, body: CrawlerPatch, admin: CurrentUser = Depends(require_admin)):
+        crawler_or_404(cid)
+        before = crawlers.effective(crawlers.registry[cid])
+        try:
+            crawlers.update(cid, admin.email, body.enabled, body.times, body.config)
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from e
+        repo.audit(admin.email, "CRAWLER_UPDATED", {"crawler": cid, "enabled": before["enabled"], "times": before["times"]},
+                   {"crawler": cid, **body.model_dump(exclude_none=True)}, now())
+        return crawlers.detail(cid)
+
+    @app.post("/crawlers/{cid}/run", status_code=202)
+    def run_crawler(cid: str, admin: CurrentUser = Depends(require_admin)):
+        crawler_or_404(cid)
+        run_id = crawlers.store.queue_run(cid, admin.email, now())
+        if run_id is None:
+            raise HTTPException(409, "this crawler already has a run queued or in progress")
+        repo.audit(admin.email, "CRAWLER_RUN_QUEUED", None, {"crawler": cid, "run_id": run_id}, now())
+        return {"run_id": run_id, "status": "QUEUED"}
+
+    @app.post("/crawlers/{cid}/upload")
+    async def upload_to_crawler(cid: str, request: Request, filename: str = "", admin: CurrentUser = Depends(require_admin)):
+        """File-inbox crawlers only: stores the file in the crawler's inbox and imports it now."""
+        c = crawler_or_404(cid)
+        ext = Path(filename).suffix.lower()
+        if not isinstance(c, InboxCrawler):
+            raise HTTPException(422, "this crawler does not take file uploads")
+        if ext not in {".csv", ".xlsx"}:
+            raise HTTPException(422, "upload a .csv or .xlsx file")
+        if (declared := request.headers.get("content-length")) and declared.isdigit() and int(declared) > MI_MAX_UPLOAD:
+            raise HTTPException(413, "file too large")
+        body = bytearray()
+        async for chunk in request.stream():
+            body += chunk
+            if len(body) > MI_MAX_UPLOAD:
+                raise HTTPException(413, "file too large")
+        c.ensure_dirs()
+        import uuid                                                   # the client's file name is never used on disk
+        (c.dir / f"upload-{now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}{ext}").write_bytes(bytes(body))
+        repo.audit(admin.email, "CRAWLER_UPLOAD", None, {"crawler": cid, "bytes": len(body)}, now())
+        result = await crawlers.run(cid, "MANUAL", admin.email)
+        if result is None:
+            raise HTTPException(409, "the crawler is running; the file will be imported on its next run")
+        return result
 
     # ---- admin --------------------------------------------------------------------------------------------------------
     @app.get("/admin/users")

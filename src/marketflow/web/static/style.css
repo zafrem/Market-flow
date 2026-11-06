@@ -125,6 +125,25 @@ small { color: var(--ink-2); font-weight: 400; font-size: 12px; }
 
 .stage { font-weight: 600; white-space: nowrap; }
 
+/* ---- crawlers: a list on the left, one management page per crawler on the right ---- */
+.crawl-layout { display: grid; grid-template-columns: 250px 1fr; gap: 16px; align-items: start; }
+.crawl-list { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.crawl-list button { display: block; width: 100%; text-align: left; border: 0; border-radius: 0; border-bottom: 1px solid var(--line); background: none; padding: 10px 14px; }
+.crawl-list li:last-child button { border-bottom: 0; }
+.crawl-list button.active { background: var(--brand-soft); box-shadow: inset 3px 0 0 var(--brand); }
+.crawl-list b { display: block; font-weight: 600; } .crawl-list small { display: block; }
+.crawl-page { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px 22px; min-height: 240px; }
+.crawl-page h2 { margin: 0 0 2px; font-size: 18px; } .crawl-page h3 { margin: 22px 0 8px; font-size: 14px; }
+.crawl-page .facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 12px 0; }
+.crawl-page .facts dt { color: var(--ink-2); } .crawl-page .facts dd { margin: 0; overflow-wrap: anywhere; }
+.crawl-page .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 10px 0; }
+.crawl-page form { display: grid; gap: 10px; max-width: 560px; margin: 0; padding: 0; border: 0; box-shadow: none; background: none; }
+.crawl-page textarea, .crawl-page input[type=text], .crawl-page input[type=number] { font: inherit; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); width: 100%; }
+.crawl-page textarea { min-height: 84px; resize: vertical; }
+.crawl-page .note { color: var(--ink-2); font-size: 13px; margin: 6px 0; }
+.crawl-page table { min-width: 0; }
+@media (max-width: 900px) { .crawl-layout { grid-template-columns: 1fr; } }
+
 @media (max-width: 720px) {
   header { padding: 10px 16px; } main { padding: 16px; }
   .fig b { font-size: 22px; }

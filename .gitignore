@@ -8,3 +8,7 @@ config/overrides.json
 config/settings.toml
 data/
 build/
+
+# file-inbox crawler drop folders (user data)
+/inbox/
+/data/inbox/

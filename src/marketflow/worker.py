@@ -1,7 +1,7 @@
 """Entrypoint.
 
   python -m marketflow.worker --once     run every enabled collector now, then exit
-  python -m marketflow.worker            run forever: benchmarks 06:00/09:00, retail 08:00/13:00/19:00, decisions +30min, alerts
+  python -m marketflow.worker            run forever: every crawler on its own schedule (dashboard > Crawlers), decisions +30min, alerts
   python -m marketflow.worker --retail   scrape configured retail platforms once (needs legal_review_ref)
   python -m marketflow.worker --check    show which sources are configured (tokens redacted)
 """
@@ -27,7 +27,8 @@ from .ingest import IngestResult, run_collector
 from .decision import service
 from .notify import Alert, Notifier, alerts_from_recommendations, alerts_from_stockouts
 from .ops_repo import Repo
-from .scheduler import BENCHMARK_TIMES, DECIDE_TIMES, RETAIL_TIMES, Job, Scheduler
+from .crawlers.service import CrawlerService
+from .scheduler import DECIDE_TIMES, Job, Scheduler
 from .partitions import ensure_partitions
 from .repository import SqlRepository
 from .settings import Settings, load_settings
@@ -92,30 +93,10 @@ async def run_retail(engine: Engine, transport: Transport, tp: TimeProvider, llm
     return results
 
 
-def build_scheduler(engine: Engine, s: Settings, transport: Transport, tp: TimeProvider, llm: LLMClient,
-                    notifier: Notifier, sleep=asyncio.sleep) -> Scheduler:
+def build_scheduler(engine: Engine, s: Settings, tp: TimeProvider, notifier: Notifier, sleep=asyncio.sleep) -> Scheduler:
+    """Fixed-time jobs. Crawlers are not here: they are scheduled per crawler (CrawlerService.loop), so their schedules
+    can be edited on the dashboard without a restart."""
     repo = Repo(engine)
-    faults: list[str] = []
-    extractor = SelfHealingExtractor(
-        llm, last_price=SqlRepository(engine).last_retail_price, alert=faults.append,
-        on_candidate=lambda plat, cand: repo.add_candidate(plat, cand, tp.now().replace(tzinfo=None)))
-
-    async def benchmarks() -> None:
-        for name, r in (await run_jobs(engine, s, transport, tp)).items():
-            if isinstance(r, Exception):
-                await notifier.dispatch([Alert(f"COLLECTOR_FAILED:{name}", "RED", f"Collector {name} failed ({type(r).__name__}).")])
-
-    async def retail() -> None:
-        faults.clear()
-        results = await run_retail(engine, transport, tp, llm, extractor)
-        alerts = [Alert(f"SELECTOR_FAULT:{m.split(':')[0]}", "RED", m) for m in faults if "ESCALATE" in m]
-        for plat, r in results.items():
-            if isinstance(r, Exception):
-                alerts.append(Alert(f"COLLECTOR_FAILED:{plat}", "RED", f"Retail scrape {plat} failed ({type(r).__name__})."))
-            elif r.candidate_pending:
-                alerts.append(Alert(f"SELECTOR_CANDIDATE:{plat}", "AMBER",
-                                    f"New selectors proposed for {plat}; review with `marketflow.cli selectors list`."))
-        await notifier.dispatch(alerts)
 
     async def decide() -> None:
         prepare_db(engine, tp)
@@ -127,8 +108,7 @@ def build_scheduler(engine: Engine, s: Settings, transport: Transport, tp: TimeP
     async def on_failure(job: Job, exc: Exception) -> None:
         await notifier.dispatch([Alert(f"JOB_FAILED:{job.name}", "RED", f"Scheduled job '{job.name}' failed ({type(exc).__name__}).")])
 
-    return Scheduler([Job("benchmarks", BENCHMARK_TIMES, benchmarks), Job("retail", RETAIL_TIMES, retail),
-                      Job("decide", DECIDE_TIMES, decide)], tp, sleep=sleep, on_failure=on_failure)
+    return Scheduler([Job("decide", DECIDE_TIMES, decide)], tp, sleep=sleep, on_failure=on_failure)
 
 
 async def main(argv: list[str]) -> int:
@@ -154,7 +134,8 @@ async def main(argv: list[str]) -> int:
             return 1 if any(isinstance(r, Exception) for r in results.values()) else 0
         prepare_db(engine, tp)
         notifier = Notifier(settings.alert_webhook_url, Repo(engine), tp)
-        await build_scheduler(engine, settings, transport, tp, get_llm(settings), notifier).run_forever()
+        crawlers = CrawlerService(engine, settings, tp, transport, lambda: get_llm(settings), notifier)
+        await asyncio.gather(build_scheduler(engine, settings, tp, notifier).run_forever(), crawlers.loop(asyncio.sleep))
     finally:
         await transport.aclose()
 

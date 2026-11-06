@@ -48,7 +48,7 @@ def cheap_scrypt(monkeypatch):
 @pytest.fixture()
 def world(tmp_path):
     tp = FixedTimeProvider(T0)
-    s = Settings(database_url=f"sqlite:///{tmp_path / 'api.db'}", jwt_secret=SECRET)
+    s = Settings(database_url=f"sqlite:///{tmp_path / 'api.db'}", jwt_secret=SECRET, inbox_dir=str(tmp_path / "inbox"))
     e = make_engine(s.database_url)
     init_sqlite(e)
     repo = AppRepository(e)
@@ -447,3 +447,52 @@ def test_mi_report_language_parameter(world):
     en = world.client.get("/mi/report", headers=h).json()
     assert "검색이" in next(r for r in ko["radar"] if r["keyword"] == "dalgi")["changed"] and "Searches" in next(r for r in en["radar"] if r["keyword"] == "dalgi")["changed"]
     assert world.client.get("/mi/report?lang=fr", headers=h).status_code == 422
+
+
+# ---- crawlers -----------------------------------------------------------------------------------------------
+def test_crawler_pages_are_for_md_and_admin_and_only_admin_can_change_them(world):
+    assert world.client.get("/crawlers").status_code == 401
+    assert world.client.get("/crawlers", headers=login(world, "buyer")).status_code == 403
+    md = login(world, "md_fruit")
+    listing = world.client.get("/crawlers", headers=md).json()["crawlers"]
+    assert [c["id"] for c in listing][:3] == ["report", "buyer", "news"]
+    assert world.client.get("/crawlers/news", headers=md).json()["fields"][0]["key"] == "feeds"
+    assert world.client.get("/crawlers/nope", headers=md).status_code == 404
+    assert world.client.put("/crawlers/news", json={"enabled": False}, headers=md).status_code == 403
+    assert world.client.post("/crawlers/report/run", headers=md).status_code == 403
+    assert world.client.post("/crawlers/report/upload?filename=a.csv", content=b"x", headers=md).status_code == 403
+
+
+def test_admin_edits_schedule_and_settings_with_validation_and_audit(world):
+    h = login(world, "admin")
+    ok = world.client.put("/crawlers/news", headers=h, json={"enabled": False, "times": ["06:15", "18:00"],
+                          "config": {"feeds": ["https://news.example/rss"], "lookback_days": 7}})
+    assert ok.status_code == 200 and ok.json()["enabled"] is False and ok.json()["times"] == ["06:15", "18:00"]
+    assert ok.json()["config"]["feeds"] == ["https://news.example/rss"] and ok.json()["state"] == "DISABLED"
+    for bad in ({"times": ["25:00"]}, {"config": {"feeds": ["http://127.0.0.1/x"]}}, {"config": {"lookback_days": 0}}, {"config": {"evil": 1}}):
+        assert world.client.put("/crawlers/news", headers=h, json=bad).status_code == 422
+    assert world.client.get("/crawlers/news", headers=h).json()["times"] == ["06:15", "18:00"]           # rejected edits changed nothing
+    assert any(e["action"] == "CRAWLER_UPDATED" for e in world.repo.audit_entries())
+
+
+def test_manual_run_is_queued_once_for_the_worker(world):
+    h = login(world, "admin")
+    first = world.client.post("/crawlers/report/run", headers=h)
+    assert first.status_code == 202 and first.json()["status"] == "QUEUED"
+    assert world.client.post("/crawlers/report/run", headers=h).status_code == 409
+    detail = world.client.get("/crawlers/report", headers=h).json()
+    assert detail["runs"][0]["status"] == "QUEUED" and detail["state"] == "QUEUED"
+
+
+def test_upload_to_a_file_crawler_imports_immediately_and_feeds_the_radar(world):
+    h = login(world, "admin")
+    r = world.client.post("/crawlers/report/upload?filename=../../etc/passwd.csv", content=MI_CSV.encode(), headers=h)
+    assert r.status_code == 200 and r.json()["status"] == "OK" and r.json()["stored"] == 18
+    saved = list((world.e.url.database and __import__("pathlib").Path(world.e.url.database).parent / "inbox" / "report" / "processed").iterdir())
+    assert len(saved) == 1 and "passwd" not in saved[0].name and saved[0].parent.name == "processed"        # client file names never reach the disk
+    assert "dalgi" in {x["keyword"] for x in world.client.get("/mi/report", headers=h).json()["radar"]}
+    assert world.client.get("/crawlers/report", headers=h).json()["data_as_of"] == "2026-10-12"
+    assert world.client.post("/crawlers/report/upload?filename=a.exe", content=b"x", headers=h).status_code == 422
+    assert world.client.post("/crawlers/news/upload?filename=a.csv", content=b"x", headers=h).status_code == 422       # not a file crawler
+    assert world.client.post("/crawlers/report/upload?filename=a.csv", content=b"x" * (5 * 1024 * 1024 + 1), headers=h).status_code == 413
+    assert any(e["action"] == "CRAWLER_UPLOAD" for e in world.repo.audit_entries())

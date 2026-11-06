@@ -214,6 +214,30 @@ CREATE TABLE IF NOT EXISTS mi_observations (
   UNIQUE KEY uq_mi (signal_type, period_start, category_l, keyword, metric),
   KEY idx_mi_period (signal_type, period_start)
 );
+
+CREATE TABLE IF NOT EXISTS crawler_settings (
+  crawler_id VARCHAR(40) PRIMARY KEY,
+  enabled TINYINT(1) NOT NULL DEFAULT 1,
+  times JSON NULL,
+  config JSON NULL,
+  last_slot DATETIME NULL,
+  updated_by VARCHAR(100) NULL,
+  updated_at DATETIME NULL
+);
+
+CREATE TABLE IF NOT EXISTS crawler_runs (
+  run_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  crawler_id VARCHAR(40) NOT NULL,
+  trigger_kind ENUM('SCHEDULED','MANUAL') NOT NULL,
+  requested_by VARCHAR(100) NOT NULL DEFAULT '',
+  status ENUM('QUEUED','RUNNING','OK','FAILED','SKIPPED') NOT NULL,
+  queued_at DATETIME NOT NULL,
+  started_at DATETIME NULL,
+  finished_at DATETIME NULL,
+  rows_loaded INT NOT NULL DEFAULT 0,
+  message VARCHAR(500) NOT NULL DEFAULT '',
+  KEY idx_crawler_runs (crawler_id, run_id)
+);
 """
 
 out = TEMPLATE.format(

@@ -12,16 +12,19 @@ from ..ops_repo import OpsRepository, _dec
 _UPSERT_SQLITE = ("INSERT INTO mi_observations (signal_type, period_start, category_l, keyword, metric, value, source) "
                   "VALUES (:signal_type,:period_start,:category_l,:keyword,:metric,:value,:source) "
                   "ON CONFLICT (signal_type, period_start, category_l, keyword, metric) DO UPDATE SET value=excluded.value, source=excluded.source")
+_KEEP_MAX_SQLITE = _UPSERT_SQLITE.replace("value=excluded.value", "value=MAX(value, excluded.value)")
 _UPSERT_MYSQL = ("INSERT INTO mi_observations (signal_type, period_start, category_l, keyword, metric, value, source) "
                  "VALUES (:signal_type,:period_start,:category_l,:keyword,:metric,:value,:source) "
                  "ON DUPLICATE KEY UPDATE value=VALUES(value), source=VALUES(source)")
+_KEEP_MAX_MYSQL = _UPSERT_MYSQL.replace("value=VALUES(value)", "value=GREATEST(value, VALUES(value))")
 
 
 class MiStore(OpsRepository):
-    def upsert_observations(self, rows: list[dict[str, Any]]) -> int:
+    def upsert_observations(self, rows: list[dict[str, Any]], keep_max: bool = False) -> int:
+        """Insert or overwrite; with keep_max an existing larger value wins (for counts that are re-derived from a rolling window)."""
         if not rows:
             return 0
-        sql = text(_UPSERT_SQLITE if self._sqlite else _UPSERT_MYSQL)
+        sql = text((_KEEP_MAX_SQLITE if keep_max else _UPSERT_SQLITE) if self._sqlite else (_KEEP_MAX_MYSQL if keep_max else _UPSERT_MYSQL))
         with self._e.begin() as c:
             c.execute(sql, [self._b(r) for r in rows])
         return len(rows)
@@ -50,3 +53,13 @@ class MiStore(OpsRepository):
             "(SELECT MAX(x.recorded_date) FROM int_operations_inventory x WHERE x.internal_sku = i.internal_sku AND x.channel_name = i.channel_name) "
             "GROUP BY m.category_l")
         return {r["category_l"]: {"stock": float(r["stock"] or 0), "daily": float(r["daily"] or 0)} for r in rows}
+
+    def tracked_keywords(self, limit: int) -> list[tuple[str, str]]:
+        """(category, keyword) pairs from the latest search period, highest volume first."""
+        rows = self._rows("SELECT category_l, keyword, value FROM mi_observations WHERE signal_type='SEARCH' AND keyword <> '' AND metric='searches' "
+                          "AND period_start = (SELECT MAX(period_start) FROM mi_observations WHERE signal_type='SEARCH') ORDER BY value DESC LIMIT :l", l=limit)
+        return [(r["category_l"], r["keyword"]) for r in rows]
+
+    def latest_period(self, signal: str) -> str | None:
+        r = self._rows("SELECT MAX(period_start) AS p FROM mi_observations WHERE signal_type = :s", s=signal)
+        return str(r[0]["p"])[:10] if r and r[0]["p"] else None

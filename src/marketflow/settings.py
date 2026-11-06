@@ -37,6 +37,7 @@ class Settings:
     tls_cert: str = ""          # PEM paths: serve HTTPS directly
     tls_key: str = ""
     trust_proxy: str = ""       # IPs/CIDRs of a reverse proxy whose X-Forwarded-For uvicorn may trust (e.g. "127.0.0.1")
+    inbox_dir: str = "data/inbox"   # file-drop folders for the report/buyer/flyer/new-product crawlers (one subfolder each)
     hsts: bool = False          # send Strict-Transport-Security (also implied by tls_cert); set when a proxy terminates TLS
     decision: Mapping[str, Any] = field(default_factory=dict)   # raw [decision] table
     mi: Mapping[str, Any] = field(default_factory=dict)         # raw [mi] table (Market Intelligence tunables)
@@ -100,6 +101,7 @@ def load_settings(path: Path | str | None = None, env: Mapping[str, str] | None 
         tls_cert=str(pick("TLS_CERT", "server", "tls_cert", default="")),
         tls_key=str(pick("TLS_KEY", "server", "tls_key", default="")),
         trust_proxy=str(pick("TRUST_PROXY", "server", "trust_proxy", default="")),
+        inbox_dir=str(pick("CRAWLER_INBOX_DIR", "crawlers", "inbox_dir", default="data/inbox")),
         hsts=_truthy(pick("HSTS", "server", "hsts", default=False)),
         decision=dict(data.get("decision", {})),
         mi=dict(data.get("mi", {})),

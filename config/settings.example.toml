@@ -62,3 +62,6 @@ api_key = ""           # env: GARAK_API_KEY
 # product = 0.2
 # promotion = 0.15
 # media = 0.15
+
+[crawlers]
+# inbox_dir = "data/inbox"     # one subfolder per file crawler: report, buyer, flyer, newproduct (shared by worker and API)

@@ -83,6 +83,15 @@ SQLITE_DDL = [
         metric TEXT NOT NULL, value NUMERIC NOT NULL, source TEXT NOT NULL DEFAULT '',
         UNIQUE (signal_type, period_start, category_l, keyword, metric))""",
     "CREATE INDEX IF NOT EXISTS idx_mi_period ON mi_observations (signal_type, period_start)",
+    """CREATE TABLE IF NOT EXISTS crawler_settings (
+        crawler_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 1, times TEXT, config TEXT,
+        last_slot TEXT, updated_by TEXT, updated_at TEXT)""",
+    """CREATE TABLE IF NOT EXISTS crawler_runs (
+        run_id INTEGER PRIMARY KEY AUTOINCREMENT, crawler_id TEXT NOT NULL, trigger_kind TEXT NOT NULL
+          CHECK (trigger_kind IN ('SCHEDULED','MANUAL')), requested_by TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL CHECK (status IN ('QUEUED','RUNNING','OK','FAILED','SKIPPED')),
+        queued_at TEXT NOT NULL, started_at TEXT, finished_at TEXT, rows_loaded INTEGER NOT NULL DEFAULT 0, message TEXT NOT NULL DEFAULT '')""",
+    "CREATE INDEX IF NOT EXISTS idx_crawler_runs ON crawler_runs (crawler_id, run_id)",
     "CREATE INDEX IF NOT EXISTS idx_retail_item_time ON ext_retail_prices (std_item_id, scraped_at)",
     "CREATE INDEX IF NOT EXISTS idx_bench_item_date ON ext_public_benchmarks (std_item_id, recorded_date)",
 ]

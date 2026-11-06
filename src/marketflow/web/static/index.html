@@ -25,7 +25,7 @@
     </section>
     <section id="app" hidden>
       <div id="summary" class="summary" data-i18n-label="summary" aria-label="Summary"></div>
-      <nav><button data-tab="matrix" class="active"><span data-i18n="tab.matrix">Comparison matrix</span></button><button data-tab="health"><span data-i18n="tab.health">Category health</span></button><button data-tab="radar"><span data-i18n="tab.radar">Trend radar</span></button><button data-tab="recs"><span data-i18n="tab.recs">Recommendations</span></button><button data-tab="review" class="decider"><span data-i18n="tab.review">Review queue</span></button><button data-tab="selectors" class="decider"><span data-i18n="tab.selectors">Selector candidates</span></button></nav>
+      <nav><button data-tab="matrix" class="active"><span data-i18n="tab.matrix">Comparison matrix</span></button><button data-tab="health"><span data-i18n="tab.health">Category health</span></button><button data-tab="radar"><span data-i18n="tab.radar">Trend radar</span></button><button data-tab="recs"><span data-i18n="tab.recs">Recommendations</span></button><button data-tab="crawlers" class="decider"><span data-i18n="tab.crawlers">Crawlers</span></button><button data-tab="review" class="decider"><span data-i18n="tab.review">Review queue</span></button><button data-tab="selectors" class="decider"><span data-i18n="tab.selectors">Selector candidates</span></button></nav>
       <p id="toast" role="status"></p>
       <div id="matrix">
         <div class="toolbar">
@@ -53,6 +53,10 @@
         <div class="scroll"><table id="radar-table"><thead><tr>
           <th data-i18n="th.keyword">Keyword</th><th data-i18n="th.stage">Stage</th><th class="r" data-i18n="th.searches">Searches</th><th data-i18n="th.other">Other signals</th><th class="r" data-i18n="th.score">Score</th><th data-i18n="th.story">What changed · why · what to do</th>
         </tr></thead><tbody></tbody></table></div>
+      </div>
+      <div id="crawlers" hidden>
+        <p class="hint" data-i18n="crawlers.hint">One crawler per data item. Each has its own schedule, settings and run history.</p>
+        <div class="crawl-layout"><ul id="crawler-list" class="crawl-list"></ul><section id="crawler-page" class="crawl-page"></section></div>
       </div>
       <div id="recs" hidden>
         <p class="decider"><button id="export-applied" data-i18n="export">Export applied prices (CSV)</button></p>

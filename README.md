@@ -84,6 +84,20 @@ One row per period (and optionally category and keyword); every other numeric co
 - **Trend Radar** gives each keyword a lifecycle stage (Seed / Emerging / Growing / Mainstream / Fading) from its search growth, its volume rank among its category's keywords, and whether product, promotion or media signals corroborate it. Weights and thresholds live in the optional `[mi]` table of `settings.toml`.
 - Users only see categories they are assigned to; rows without a category are admin-only. Nothing here uses cost data.
 
+## Crawlers (one per data item, each with its own page)
+Dashboard > **Crawlers** (administrators change things, MDs can look). Every data item has its own crawler with its own page (`#/crawlers/<id>`): on/off, schedule (KST times, editable without a restart), settings, status, data freshness and run history. Failures raise a `CRAWLER_FAILED` alert.
+
+| Crawler | Feeds | How it gets data |
+|---|---|---|
+| `report` | search report (SEARCH) | file inbox: drop the Hive export as CSV/XLSX, or upload it on the page |
+| `buyer` | internal sales (BUYER) | file inbox (Power BI export) |
+| `news` | news mentions (MEDIA) | fetches the RSS/Atom feeds you list; counts articles per week per tracked keyword |
+| `competitor` | competitor prices | the retail scraper with self-healing selectors (`config/extraction.json`) |
+| `flyer`, `newproduct` | promotion / new-product signals | file inbox (flyer OCR and the Kurly collection happen outside; their output goes in the inbox) |
+| `benchmark_kamis`, `benchmark_garak` | public wholesale prices | the KAMIS / Garak APIs |
+
+File crawlers read `data/inbox/<id>/*.csv|xlsx` (`[crawlers] inbox_dir`), move each file to `processed/` or `failed/`, and ignore symlinks. The worker (`python -m marketflow.worker`) runs every enabled crawler at its times and picks up "Run now" requests within about 30 seconds. `python -m marketflow.cli crawlers` lists them, `crawler-run ID` runs one in the current process. In Docker the worker and API share `./inbox`.
+
 ## Running unattended (scheduler, alerts, review queue)
 
 ```bash

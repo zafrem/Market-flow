@@ -7,6 +7,8 @@
   python -m marketflow.cli export-prices [--since YYYY-MM-DD] [--file OUT.csv]   (applied price changes, for channel bulk upload)
   python -m marketflow.cli import-mi FILE --type SEARCH|BUYER|SKU|PRODUCT|PROMOTION|MEDIA [--source NAME]   (market-intelligence signals)
   python -m marketflow.cli mi-report [--stable] [--lang en|ko]                     (category health + trend radar)
+  python -m marketflow.cli crawlers                                 (every crawler: state, schedule, last run)
+  python -m marketflow.cli crawler-run ID                           (run one crawler now, in this process)
   python -m marketflow.cli audit
   python -m marketflow.cli review | resolve ID --as NAME:ROLE        (items the machine could not decide: unmatched/unparseable/quarantined)
   python -m marketflow.cli selectors | approve-selector ID | reject-selector ID --as NAME:ROLE
@@ -43,6 +45,8 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
     p = sub.add_parser("export-prices"); p.add_argument("--since"); p.add_argument("--file")
     p = sub.add_parser("import-mi"); p.add_argument("file"); p.add_argument("--type", required=True); p.add_argument("--source", default="")
     p = sub.add_parser("mi-report"); p.add_argument("--stable", action="store_true"); p.add_argument("--lang", choices=["en", "ko"], default="en")
+    sub.add_parser("crawlers")
+    p = sub.add_parser("crawler-run"); p.add_argument("crawler_id")
     sub.add_parser("audit")
     sub.add_parser("review")
     sub.add_parser("selectors")
@@ -165,6 +169,30 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
         for r in rep["radar"]:
             print(f"  {r['keyword']:<14} {r['stage']:<10} score={r['score']:<5} opp={r['opportunity']:<5} [{r['category']}] {r['changed']}\n      why: {r['why']}\n      do:  {r['action']}", file=out)
         return 0
+    if a.cmd in {"crawlers", "crawler-run"}:
+        import asyncio
+        from .crawlers.service import CrawlerService
+        from .llm import get_llm
+        from .transport import HttpTransport
+        transport = HttpTransport() if a.cmd == "crawler-run" else None
+        svc = CrawlerService(engine, settings, tp, transport, lambda: get_llm(settings))
+        if a.cmd == "crawlers":
+            for c in svc.list():
+                last = c["last_run"]
+                print(f"{c['id']:<16} {c['state']:<15} {','.join(c['times']):<22} last: " + (f"{last['status']} {last['finished_at'] or last['queued_at']} {last['message'][:60]}" if last else "never"), file=out)
+            return 0
+        if a.crawler_id not in svc.registry:
+            print(f"refused: unknown crawler (try: {', '.join(svc.registry)})", file=out)
+            return 2
+
+        async def go():
+            try:
+                return await svc.run(a.crawler_id, "MANUAL", "cli")
+            finally:
+                await transport.aclose()
+        res = asyncio.run(go())
+        print("already running" if res is None else f"{res['status']} stored={res['stored']} {res['message']}", file=out)
+        return 0 if res and res["status"] in {"OK", "SKIPPED"} else 1
     if a.cmd == "audit":
         for e in repo.audit_entries():
             print(f"{e['ts']} {e['actor']} {e['action']} {e['before_state']} -> {e['after_state']}", file=out)

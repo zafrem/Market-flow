@@ -10,6 +10,7 @@ dependencies = [
   "cryptography>=42",
   "tzdata",
   "beautifulsoup4>=4.12",
+  "defusedxml>=0.7",
   "openpyxl>=3.1",
   "fastapi>=0.110",
   "uvicorn>=0.29",

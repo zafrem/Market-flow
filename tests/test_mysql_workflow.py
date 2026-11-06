@@ -104,3 +104,38 @@ def test_api_login_matrix_and_recommendations(env):
     recs = c.get("/recommendations", headers=h).json()["recommendations"]
     assert recs and all(isinstance(r["flags"], dict) for r in recs)
     assert c.post(f"/recommendations/{recs[0]['rec_id']}/approve", headers=h).status_code == 200
+
+
+def test_crawler_settings_runs_and_mi_upserts(env):
+    """The crawler/MI tables and their MySQL-specific SQL (JSON columns, ENUMs, ON DUPLICATE KEY ... GREATEST)."""
+    from datetime import date
+    from marketflow.crawlers.store import CrawlerStore
+    from marketflow.mi.store import MiStore
+    _, _, e, _ = env
+    now = T0.replace(tzinfo=None)
+    with e.begin() as c:
+        for t in ("crawler_runs", "crawler_settings", "mi_observations"):
+            c.execute(text(f"DELETE FROM {t}"))
+    st = CrawlerStore(e)
+    assert st.get_settings("news")["enabled"] is True
+    st.save_settings("news", False, ["07:00", "18:30"], {"feeds": ["https://n.example/rss"], "lookback_days": 7}, "kim", now)
+    st.save_settings("news", False, ["07:00"], {"feeds": []}, "kim", now)                       # second save updates, not inserts
+    got = st.get_settings("news")
+    assert got["enabled"] is False and got["times"] == ["07:00"] and got["config"] == {"feeds": []}
+    st.set_last_slot("news", now)
+    assert st.get_settings("news")["last_slot"] == now
+    q = st.queue_run("news", "kim", now)
+    assert q and st.queue_run("news", "lee", now) is None
+    assert st.start_run("news", "MANUAL", "kim", now, q) == q and st.start_run("news", "SCHEDULED", "scheduler", now) is None
+    st.finish_run(q, "OK", 3, "done", now)
+    assert st.runs("news")[0]["status"] == "OK" and st.last_success("news")
+    rid = st.start_run("news", "SCHEDULED", "scheduler", now)
+    assert rid and st.reap_stale(now + timedelta(hours=3)) == 1 and st.runs("news")[0]["status"] == "FAILED"
+    mi = MiStore(e)
+    row = {"signal_type": "MEDIA", "period_start": date(2026, 11, 2), "category_l": "Fruit", "keyword": "딸기", "metric": "count", "value": 5, "source": "news"}
+    mi.upsert_observations([row])
+    mi.upsert_observations([{**row, "value": 2}], keep_max=True)
+    assert [r["value"] for r in mi.observations(5)] == [5]
+    mi.upsert_observations([{**row, "value": 2}])
+    assert [r["value"] for r in mi.observations(5)] == [2]
+    assert mi.tracked_keywords(5) == [] and mi.latest_period("MEDIA") == "2026-11-02"

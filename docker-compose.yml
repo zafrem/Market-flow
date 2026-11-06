@@ -35,6 +35,7 @@ services:
       TZ: Asia/Seoul
     volumes:
       - ./config:/app/config   # edit rules / approved overrides without rebuilding
+      - ./inbox:/app/data/inbox   # file-inbox crawlers (report, buyer, flyer, new product): shared with the API so dashboard uploads reach the same folders
     depends_on:
       db:
         condition: service_healthy
@@ -50,6 +51,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (>= 32 chars) in .env}
       TOKEN_TTL_MINUTES: ${TOKEN_TTL_MINUTES:-60}
       TZ: Asia/Seoul
+    volumes:
+      - ./inbox:/app/data/inbox
     ports:
       - "127.0.0.1:${API_PORT:-8000}:8000"          # localhost only; put a TLS reverse proxy in front for remote access
     depends_on:
