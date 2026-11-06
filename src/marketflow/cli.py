@@ -5,6 +5,8 @@
   python -m marketflow.cli recs [--status PENDING]
   python -m marketflow.cli approve|reject|apply|revert ID --as NAME:ROLE      (ROLE: ADMIN | MD | BUYER)
   python -m marketflow.cli export-prices [--since YYYY-MM-DD] [--file OUT.csv]   (applied price changes, for channel bulk upload)
+  python -m marketflow.cli import-mi FILE --type SEARCH|BUYER|SKU|PRODUCT|PROMOTION|MEDIA [--source NAME]   (market-intelligence signals)
+  python -m marketflow.cli mi-report [--stable]                     (category health + trend radar)
   python -m marketflow.cli audit
   python -m marketflow.cli review | resolve ID --as NAME:ROLE        (items the machine could not decide: unmatched/unparseable/quarantined)
   python -m marketflow.cli selectors | approve-selector ID | reject-selector ID --as NAME:ROLE
@@ -39,6 +41,8 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
     for name in ("approve", "reject", "apply", "revert"):
         p = sub.add_parser(name); p.add_argument("rec_id", type=int); p.add_argument("--as", dest="actor", required=True, metavar="NAME:ROLE")
     p = sub.add_parser("export-prices"); p.add_argument("--since"); p.add_argument("--file")
+    p = sub.add_parser("import-mi"); p.add_argument("file"); p.add_argument("--type", required=True); p.add_argument("--source", default="")
+    p = sub.add_parser("mi-report"); p.add_argument("--stable", action="store_true")
     sub.add_parser("audit")
     sub.add_parser("review")
     sub.add_parser("selectors")
@@ -136,6 +140,30 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
             if a.file:
                 fh.close()
         print(f"exported {len(rows)} price change(s)", file=sys.stderr if not a.file else out)
+        return 0
+    if a.cmd == "import-mi":
+        from .mi.importer import import_signals
+        from .mi.store import MiStore
+        try:
+            res = import_signals(a.file, MiStore(engine), a.type, a.source or a.file.rsplit("/", 1)[-1])
+        except ValueError as e:
+            print(f"refused: {e}", file=out)
+            return 2
+        print(f"loaded={res.loaded} errors={len(res.errors)}", file=out)
+        for e in res.errors[:50]:
+            print(f"  line {e.line} [{e.field}] {e.message}", file=out)
+        return 1 if res.errors and res.loaded == 0 else 0
+    if a.cmd == "mi-report":
+        from .mi.service import mi_report
+        from .mi.store import MiStore
+        rep = mi_report(MiStore(engine), settings, None, a.stable)
+        print(f"as of {rep['as_of']}  signals: {', '.join(rep['signals']) or 'none'}", file=out)
+        print("\nCATEGORY HEALTH", file=out)
+        for h in rep["health"]:
+            print(f"  {h['category']:<14} {h['demand_state']:<10} {h['changed']}\n      why: {h['why']}\n      do:  {h['action']}", file=out)
+        print("\nTREND RADAR", file=out)
+        for r in rep["radar"]:
+            print(f"  {r['keyword']:<14} {r['stage']:<10} score={r['score']:<5} opp={r['opportunity']:<5} [{r['category']}] {r['changed']}\n      why: {r['why']}\n      do:  {r['action']}", file=out)
         return 0
     if a.cmd == "audit":
         for e in repo.audit_entries():

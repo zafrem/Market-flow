@@ -116,6 +116,13 @@ small { color: var(--ink-2); font-weight: 400; font-size: 12px; }
        font-size: 12.5px; line-height: 1.35; white-space: nowrap; box-shadow: 0 6px 20px rgba(0, 0, 0, .25); font-variant-numeric: tabular-nums; }
 #tip b { display: block; font-size: 14px; }
 
+/* ---- market intelligence ---- */
+.story { min-width: 340px; max-width: 520px; font-size: 13px; line-height: 1.45; }
+.story p { margin: 0 0 4px; } .story p:last-child { margin: 0; }
+.story b { font-weight: 600; }
+
+.stage { font-weight: 600; white-space: nowrap; }
+
 @media (max-width: 720px) {
   header { padding: 10px 16px; } main { padding: 16px; }
   .fig b { font-size: 22px; }

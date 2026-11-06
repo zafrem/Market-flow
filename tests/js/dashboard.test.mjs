@@ -30,6 +30,7 @@ function boot({ role = "MD", routes = {} } = {}) {
     "GET /selectors": () => [200, { candidates: [
       { cand_id: 3, platform: "SHOPA", status: "PENDING", selectors: { item: "article.card", fields: { title: { css: "h3" }, sale_price: { css: "b" } } } },
       { cand_id: 2, platform: "SHOPA", status: "APPROVED", selectors: { item: "li.old", fields: { title: { css: "a" }, sale_price: { css: "i" } } } }] }],
+    "GET /mi/report": () => [200, { health: [], radar: [], as_of: null, signals: [] }],
     ...routes,
   };
   const dom = new JSDOM(html, { runScripts: "outside-only", url: "http://localhost/" });
@@ -277,4 +278,55 @@ test("margin gets its own chart, in percentage points, for MD but not BUYER", as
   assert.equal(cell.classList.contains("green"), true);
   const b = boot({ role: "BUYER" }); await b.login();
   assert.equal(firstRow(b).children[4].hidden, true); assert.equal(firstRow(b).children[4].querySelectorAll("svg").length, 0);
+});
+
+const MI = {
+  as_of: "2026-10-12", signals: ["SEARCH", "BUYER"],
+  health: [{ category: "Fresh", demand_metric: "gmv", demand_state: "GROWING", demand_change: 0.12, interest_change: 0.4,
+    demand_series: [["2026-09-28", "1000"], ["2026-10-05", "1100"], ["2026-10-12", "1250000"]],
+    interest_series: [["2026-09-28", "10"], ["2026-10-05", "12"], ["2026-10-12", "20"]],
+    share_pct: 62.5, share_shift_pp: 1.8, supply: { cover_days: 2.5, status: "TIGHT", stock: 25 },
+    changed: "GMV rose 12%", why: "Stock covers only 2.5 days of sales.", action: "Demand is rising while stock is tight: secure supply first." }],
+  radar: [
+    { keyword: "딸기라떼", category: "Fresh", stage: "EMERGING", growth: 0.8, score: 61.5, opportunity: 55.1, volume_percentile: 0.2,
+      search_series: [["2026-09-28", "5"], ["2026-10-05", "9"], ["2026-10-12", "18"]], signals: { product: 0, promotion: 2, media: 1 }, corroborating: ["media", "promotion"],
+      changed: "Searches rose 80%", why: "This measures interest, not demand.", action: "Review assortment." },
+    { keyword: "<b>x</b>", category: "", stage: "FADING", growth: -0.4, score: 0, opportunity: 0, volume_percentile: null,
+      search_series: [["2026-10-05", "9"], ["2026-10-12", "5"]], signals: { product: 0, promotion: 0, media: 0 }, corroborating: [],
+      changed: "Searches fell 40%", why: "Interest is falling.", action: "Avoid new purchase commitments." }],
+};
+
+test("category health shows demand and interest charts, share, supply and the three-part story", async () => {
+  const t = boot({ routes: { "GET /mi/report": () => [200, MI] } }); await t.login();
+  const row = t.d.querySelector("#health-table tbody tr"), cells = [...row.children].map(text);
+  assert.match(cells[0], /Fresh/); assert.match(cells[0], /▲ Rising/);
+  assert.match(cells[1], /125만/); assert.match(cells[1], /\+12% vs earlier/);
+  assert.equal(row.querySelectorAll("svg.spark").length, 2);                                       // one chart per measure
+  assert.match(cells[3], /62\.5% \(\+1\.8 pt\)/); assert.match(cells[4], /2\.5 days · tight/);
+  assert.match(cells[5], /What changed: GMV rose 12%/); assert.match(cells[5], /Why it matters: Stock covers/); assert.match(cells[5], /What to do: Demand is rising/);
+  assert.match(row.querySelector("svg.spark").getAttribute("aria-label"), /Fresh GMV, last 3 days/);
+});
+
+test("trend radar lists stages in words, marks interest-only, and escapes keyword text", async () => {
+  const t = boot({ routes: { "GET /mi/report": () => [200, MI] } }); await t.login();
+  const rows = [...t.d.querySelectorAll("#radar-table tbody tr")];
+  assert.equal(rows.length, 2);
+  const c = [...rows[0].children].map(text);
+  assert.equal(c[0].startsWith("딸기라떼"), true); assert.equal(c[1], "◑ Emerging"); assert.match(c[2], /\+80% vs earlier/);
+  assert.match(c[3], /Promotion 2/); assert.match(c[3], /Media 1/); assert.equal(c[4], "61.5"); assert.match(c[5], /interest, not demand/);
+  assert.equal([...rows[1].children].map(text)[4], "–");                                           // fading keywords carry no opportunity score
+  assert.equal(rows[1].children[0].querySelectorAll("b").length, 0);                                // "<b>x</b>" stayed text
+  assert.match(text(rows[1].children[0]), /<b>x<\/b>/); assert.match(text(rows[1].children[0]), /No category/);
+  assert.equal(text(t.d.querySelector('nav button[data-tab="radar"] .badge')), "1");               // one seed/emerging keyword to look at
+});
+
+test("market-intelligence tabs switch panels, and the flat-keyword toggle re-queries", async () => {
+  const t = boot(); await t.login();
+  await t.click(t.d.querySelector('nav button[data-tab="radar"]'));
+  assert.equal(t.d.querySelector("#radar").hidden, false); assert.equal(t.d.querySelector("#matrix").hidden, true);
+  assert.match(text(t.d.querySelector("#radar-table .empty")), /import-mi FILE\.csv --type SEARCH/);
+  await t.click(t.d.querySelector('nav button[data-tab="health"]'));
+  assert.match(text(t.d.querySelector("#health-table .empty")), /import-mi FILE\.csv --type BUYER/);
+  const box = t.d.querySelector("#radar-stable"); box.checked = true; box.dispatchEvent(new t.w.Event("change", { bubbles: true })); await settle();
+  assert.ok(t.calls.some((c) => c.path === "/mi/report?include_stable=true"));
 });

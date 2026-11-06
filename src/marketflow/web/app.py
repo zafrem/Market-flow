@@ -16,6 +16,9 @@ from .. import curation
 from ..db import init_sqlite, make_engine
 from ..decision import service
 from ..decision.service import Actor, WorkflowError
+from ..mi.importer import import_signals
+from ..mi.service import mi_report
+from ..mi.store import MiStore
 from ..settings import Settings
 from ..time_provider import SystemTimeProvider, TimeProvider
 from .repo import AppRepository, Scope, in_scope
@@ -24,6 +27,7 @@ from .security import LoginThrottle, MIN_PASSWORD_LEN, MIN_SECRET_LEN, burn_veri
 STATIC = Path(__file__).parent / "static"
 COST_KEYS = {"purchase_cost", "fixed_cost", "logistics_cost", "channel_fee_rate", "promo_cost", "min_price_floor",
              "margin_amount", "margin_rate", "margin_trend"}
+MI_MAX_UPLOAD = 5 * 1024 * 1024
 Role = Literal["ADMIN", "MD", "BUYER"]
 
 
@@ -88,6 +92,7 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
     if engine.dialect.name == "sqlite":
         init_sqlite(engine)
     repo = AppRepository(engine)
+    mi_store = MiStore(engine)
     throttle = LoginThrottle()
     app = FastAPI(title="MarketFlow", docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -225,6 +230,35 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
     @app.post("/selectors/{cand_id}/{action}")
     def decide_selector(cand_id: int, action: Literal["approve", "reject"], user: CurrentUser = Depends(require_decider)):
         return run_curation(curation.approve_selector if action == "approve" else curation.reject_selector, cand_id, user)
+
+    # ---- market intelligence (no cost data; filtered to the caller's categories) ---------------------------------------
+    @app.get("/mi/report")
+    def mi(include_stable: bool = False, user: CurrentUser = Depends(current_user)):
+        allowed = None if user.scope is None else {l for l, _ in user.scope}
+        return mi_report(mi_store, settings, allowed, include_stable)
+
+    @app.post("/mi/import")
+    async def mi_import(request: Request, signal_type: str, source: str = "", admin: CurrentUser = Depends(require_admin)):
+        """Body: the CSV text (UTF-8 or CP949). Admin only; capped at MI_MAX_UPLOAD bytes."""
+        declared = request.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > MI_MAX_UPLOAD:
+            raise HTTPException(413, "file too large")
+        body = bytearray()
+        async for chunk in request.stream():
+            body += chunk
+            if len(body) > MI_MAX_UPLOAD:
+                raise HTTPException(413, "file too large")
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "upload.csv"
+            f.write_bytes(bytes(body))
+            try:
+                res = import_signals(f, mi_store, signal_type, source)
+            except ValueError as e:
+                raise HTTPException(422, str(e)) from e
+        repo.audit(admin.email, "MI_IMPORT", None, {"signal_type": signal_type.upper(), "loaded": res.loaded, "errors": len(res.errors)}, now())
+        return {"loaded": res.loaded, "errors": [{"line": e.line, "field": e.field, "message": e.message} for e in res.errors[:50]],
+                "error_count": len(res.errors)}
 
     # ---- admin --------------------------------------------------------------------------------------------------------
     @app.get("/admin/users")

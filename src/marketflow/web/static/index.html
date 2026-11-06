@@ -25,7 +25,7 @@
     </section>
     <section id="app" hidden>
       <div id="summary" class="summary" aria-label="Summary"></div>
-      <nav><button data-tab="matrix" class="active">Comparison matrix</button><button data-tab="recs">Recommendations</button><button data-tab="review" class="decider">Review queue</button><button data-tab="selectors" class="decider">Selector candidates</button></nav>
+      <nav><button data-tab="matrix" class="active">Comparison matrix</button><button data-tab="health">Category health</button><button data-tab="radar">Trend radar</button><button data-tab="recs">Recommendations</button><button data-tab="review" class="decider">Review queue</button><button data-tab="selectors" class="decider">Selector candidates</button></nav>
       <p id="toast" role="status"></p>
       <div id="matrix">
         <div class="toolbar">
@@ -39,6 +39,19 @@
           <th class="cost r">Margin</th>
           <th class="r"><span class="legend-dot c-comp"></span>Lowest competitor<br><small>pack price</small></th>
           <th class="r">Stock</th><th>Watch</th>
+        </tr></thead><tbody></tbody></table></div>
+      </div>
+      <div id="health" hidden>
+        <div class="toolbar"><p class="hint" id="health-hint">Demand is real sales (GMV or units sold); search is shown as interest only.</p></div>
+        <div class="scroll"><table id="health-table"><thead><tr>
+          <th>Category</th><th class="r">Demand</th><th class="r">Search interest</th><th class="r">Share of demand</th><th class="r">Stock cover</th><th>What changed · why · what to do</th>
+        </tr></thead><tbody></tbody></table></div>
+      </div>
+      <div id="radar" hidden>
+        <div class="toolbar"><p class="hint">Keywords gaining interest, ranked by opportunity: rising, still small, and backed by other signals. Interest is not demand.</p>
+          <label class="inline"><input type="checkbox" id="radar-stable"> Include flat keywords</label></div>
+        <div class="scroll"><table id="radar-table"><thead><tr>
+          <th>Keyword</th><th>Stage</th><th class="r">Searches</th><th>Other signals</th><th class="r">Score</th><th>What changed · why · what to do</th>
         </tr></thead><tbody></tbody></table></div>
       </div>
       <div id="recs" hidden>

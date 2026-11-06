@@ -50,3 +50,15 @@ api_key = ""           # env: GARAK_API_KEY
 # round_to = 10                    # price tick (KRW)
 # flash_discount_pct = 10          # spoilage-risk markdown
 # alert_margin_pct = 10            # LOW_MARGIN flag at or below this net margin
+
+[mi]                   # Market Intelligence (Category Health + Trend Radar); every key is optional
+# min_periods = 4              # observations a keyword needs before it gets a lifecycle stage
+# recent_periods = 2           # growth = last N periods vs the N before
+# rising_threshold = 0.15      # keyword search growth that counts as rising
+# health_threshold = 0.03      # category demand change below this = steady
+# demand_metrics = ["gmv", "unitsold"]
+# [mi.weights]                 # Trend Radar score weights (relative)
+# search = 0.5
+# product = 0.2
+# promotion = 0.15
+# media = 0.15

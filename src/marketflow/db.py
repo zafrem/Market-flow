@@ -76,6 +76,13 @@ SQLITE_DDL = [
     """CREATE TABLE IF NOT EXISTS selector_candidates (
         cand_id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, platform TEXT NOT NULL, selectors TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','APPROVED','REJECTED')), decided_by TEXT, decided_at TEXT)""",
+    """CREATE TABLE IF NOT EXISTS mi_observations (
+        obs_id INTEGER PRIMARY KEY AUTOINCREMENT, signal_type TEXT NOT NULL
+          CHECK (signal_type IN ('SEARCH','BUYER','SKU','PRODUCT','PROMOTION','MEDIA')),
+        period_start TEXT NOT NULL, category_l TEXT NOT NULL DEFAULT '', keyword TEXT NOT NULL DEFAULT '',
+        metric TEXT NOT NULL, value NUMERIC NOT NULL, source TEXT NOT NULL DEFAULT '',
+        UNIQUE (signal_type, period_start, category_l, keyword, metric))""",
+    "CREATE INDEX IF NOT EXISTS idx_mi_period ON mi_observations (signal_type, period_start)",
     "CREATE INDEX IF NOT EXISTS idx_retail_item_time ON ext_retail_prices (std_item_id, scraped_at)",
     "CREATE INDEX IF NOT EXISTS idx_bench_item_date ON ext_public_benchmarks (std_item_id, recorded_date)",
 ]

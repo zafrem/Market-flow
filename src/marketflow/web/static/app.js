@@ -87,7 +87,7 @@ const sentence = (code) => { const t = String(code).replace(/_/g, " ").toLowerCa
 
 function toast(msg) { $("#toast").textContent = msg || ""; }
 
-function signOut() { token = me = null; lastRows = []; pendingCount = null; tip().hidden = true; $("#app").hidden = true; $("#login").hidden = false; $("#who").textContent = ""; }
+function signOut() { token = me = null; lastRows = []; miReport = null; pendingCount = null; tip().hidden = true; $("#app").hidden = true; $("#login").hidden = false; $("#who").textContent = ""; }
 
 $("#login-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
@@ -101,15 +101,16 @@ $("#login-form").addEventListener("submit", async (ev) => {
     document.querySelectorAll(".cost, .decider").forEach((c) => c.hidden = me.role === "BUYER");
     toast("");
     watch = new Set((await api("/watchlist")).std_item_ids);
-    await Promise.all([loadMatrix(), loadRecs(), ...(me.role === "BUYER" ? [] : [loadReview(), loadSelectors()])]);
+    await Promise.all([loadMatrix(), loadMi(), loadRecs(), ...(me.role === "BUYER" ? [] : [loadReview(), loadSelectors()])]);
   } catch (e) { $("#login-error").textContent = e.message; }
 });
 
 document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => {
   document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("active", x === b));
-  for (const id of ["matrix", "recs", "review", "selectors"]) $("#" + id).hidden = b.dataset.tab !== id;
+  for (const id of ["matrix", "health", "radar", "recs", "review", "selectors"]) $("#" + id).hidden = b.dataset.tab !== id;
 }));
 $("#only-watch").addEventListener("change", loadMatrix);
+$("#radar-stable").addEventListener("change", loadMi);
 
 async function loadMatrix() {
   const { rows } = await api("/matrix" + ($("#only-watch").checked ? "?watchlist=true" : ""));
@@ -193,6 +194,60 @@ async function loadSelectors() {
     tr.append(el("td", c.cand_id), el("td", c.platform), el("td", c.status), el("td", c.selectors.item), el("td", c.selectors.fields.title.css), el("td", c.selectors.fields.sale_price.css), act);
     body.append(tr);
   }
+}
+
+// ---- market intelligence: category health + trend radar -------------------------------------------------------------
+let miReport = null;
+const pctText = (x) => x === null || x === undefined ? "–" : (x > 0 ? "+" : x < 0 ? "−" : "") + Math.abs(x * 100).toFixed(0) + "%";
+const STAGE = { SEED: "◔ Seed", EMERGING: "◑ Emerging", GROWING: "▲ Growing", MAINSTREAM: "● Mainstream", FADING: "▼ Fading", STABLE: "▬ Flat" };
+const DEMAND = { GROWING: "▲ Rising", WEAKENING: "▼ Falling", STEADY: "▬ Steady", NO_DATA: "No data" };
+
+// The three questions the framework asks of every signal, as one cell
+function story(r) {
+  const td = el("td", "", "story");
+  for (const [label, text] of [["What changed", r.changed], ["Why it matters", r.why], ["What to do", r.action]]) {
+    const p = el("p"); p.append(el("b", label + ": "), document.createTextNode(text)); td.append(p);
+  }
+  return td;
+}
+const emptyRow = (body, cols, text) => { const td = el("td", text, "empty"); td.colSpan = cols; const tr = el("tr"); tr.append(td); body.append(tr); };
+const compact = (v) => Number(v).toLocaleString("ko-KR", { notation: "compact", maximumFractionDigits: 1 });
+
+function renderHealth(rows) {
+  const body = $("#health-table tbody"); body.replaceChildren();
+  if (!rows.length) return emptyRow(body, 6, "No market-signal data yet. Import buyer or SKU sales with: python -m marketflow.cli import-mi FILE.csv --type BUYER");
+  for (const h of rows) {
+    const tr = el("tr"), name = el("td"), last = (s) => s.length ? s[s.length - 1][1] : null;
+    name.append(el("span", h.category, "item"), el("small", DEMAND[h.demand_state]));
+    const unit = { gmv: "GMV", unitsold: "Units sold" }[h.demand_metric] || "Demand";
+    tr.append(name,
+      h.demand_series.length ? trendCell(compact(last(h.demand_series)), h.demand_series, "c-margin", h.category + " " + unit, (v) => compact(v), pctText(h.demand_change) + " vs earlier") : el("td", "–", "num"),
+      h.interest_series.length ? trendCell(compact(last(h.interest_series)), h.interest_series, "c-margin", h.category + " searches", (v) => compact(v), pctText(h.interest_change) + " vs earlier") : el("td", "–", "num"));
+    tr.append(el("td", h.share_pct === null ? "–" : h.share_pct + "%" + (h.share_shift_pp === null ? "" : " (" + (h.share_shift_pp > 0 ? "+" : h.share_shift_pp < 0 ? "−" : "") + Math.abs(h.share_shift_pp) + " pt)"), "num"));
+    const sup = h.supply;
+    tr.append(el("td", !sup ? "–" : sup.cover_days === null ? "No sales" : sup.cover_days + " days · " + sup.status.toLowerCase(), "num"), story(h));
+    body.append(tr);
+  }
+}
+
+function renderRadar(rows) {
+  const body = $("#radar-table tbody"); body.replaceChildren();
+  if (!rows.length) return emptyRow(body, 6, "Nothing on the radar yet. Import weekly keyword searches with: python -m marketflow.cli import-mi FILE.csv --type SEARCH");
+  for (const r of rows) {
+    const tr = el("tr"), name = el("td"), sig = Object.entries(r.signals).filter(([, v]) => v > 0).map(([k, v]) => sentence(k) + " " + v);
+    name.append(el("span", r.keyword, "item"), el("small", r.category || "No category"));
+    const last = r.search_series[r.search_series.length - 1];
+    tr.append(name, el("td", STAGE[r.stage] || r.stage, "stage"),
+      trendCell(compact(last[1]), r.search_series, "c-margin", r.keyword + " searches", (v) => compact(v), pctText(r.growth) + " vs earlier"),
+      el("td", sig.length ? sig.join(" · ") : "None yet"), el("td", r.stage === "FADING" || r.stage === "STABLE" ? "–" : r.score, "num"), story(r));
+    body.append(tr);
+  }
+}
+
+async function loadMi() {
+  miReport = await api("/mi/report" + ($("#radar-stable").checked ? "?include_stable=true" : ""));
+  renderHealth(miReport.health); renderRadar(miReport.radar);
+  setBadge("radar", miReport.radar.filter((r) => ["SEED", "EMERGING"].includes(r.stage)).length);
 }
 
 // Applied price changes as CSV for a manual channel bulk upload (the system never writes to a channel itself).

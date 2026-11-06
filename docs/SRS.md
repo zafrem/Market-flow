@@ -241,6 +241,12 @@ Internal cost accounting, warehouse balance, and velocity snapshot.
   $$\text{[Public Wholesale Index]} \longleftrightarrow \text{[Internal Landed Cost \& Active Price]} \longleftrightarrow \text{[Competitor Scraped Prices]}$$
 * **F-05-3 (Configurable Notification Rules):** Webhook/Slack alert dispatches when margin drops below threshold ($\le 10\%$ default; per category the highest `alert_margin_bep` among active ADMINs and the MDs assigned to it, BUYERs ignored) or stock-out events occur. Alerts are de-duplicated per (rule, item, channel) with a configurable suppression window (default 6h, persisted in `alert_log`), rate-limited, and retried with exponential backoff (max 5 attempts) before landing in a dead-letter log.
 
+### F-06: Market Intelligence (Category Health + Trend Radar)
+Implemented per `docs/MI_FRAMEWORK.md`. Demand and interest signals (SEARCH, BUYER, SKU, PRODUCT, PROMOTION, MEDIA) are imported from CSV/XLSX (`import-mi`, or admin-only `POST /mi/import`) into `mi_observations` (long format, upsert on signal/period/category/keyword/metric).
+* **F-06-1 (Category Health):** per category, demand direction (GMV, else units sold; recent mean vs prior mean), demand-share shift in percentage points, stock cover from `int_operations_inventory` (TIGHT < 3 days, SURPLUS > 14), and a Search→demand lead test: period-over-period changes correlated at lags 0..2, accepted only above both `lead_min_r` and a one-sided p<0.01 critical value, otherwise search is reported as interest, not demand.
+* **F-06-2 (Trend Radar):** per keyword, a lifecycle stage (SEED / EMERGING / GROWING / MAINSTREAM / FADING) from search growth, volume percentile among at least three peers in its category, and corroboration by PRODUCT / PROMOTION / MEDIA mentions; a weighted score (weights configurable in `[mi.weights]`) and an opportunity score (score × (1 − volume percentile)).
+* **F-06-3 (Presentation and access):** every row carries "what changed / why it matters / what to do". Users see only their assigned `category_l` values; rows without a category are admin-only; no cost data is involved.
+
 ---
 
 ## 5. Non-Functional & Operational Requirements

@@ -393,3 +393,48 @@ def test_matrix_runs_a_fixed_number_of_queries_regardless_of_item_count(world):
                        "logistics_cost, channel_fee_rate, promo_cost, vat_inclusive, pack_std_units, current_selling_price, stock_qty, daily_sales_qty, "
                        "min_price_floor, lifecycle_metric FROM int_operations_inventory WHERE internal_sku = 'APPLE-1'"))
     assert count() == base
+
+
+# ---- market intelligence ----------------------------------------------------------------------------------
+MI_CSV = "week,category,keyword,searches\n" + "".join(
+    f"2026-{m:02d}-{d:02d},{c},{k},{v}\n"
+    for c, k, vals in [("Fresh", "dalgi", [5, 5, 6, 8, 14, 20]), ("Dairy", "milk", [90, 90, 95, 90, 91, 90]), ("", "mystery", [1, 2, 3, 4, 5, 6])]
+    for (m, d), v in zip([(9, 7), (9, 14), (9, 21), (9, 28), (10, 5), (10, 12)], vals))
+MI_DEMAND = "week,category,gmv\n" + "".join(f"2026-{m:02d}-{d:02d},{c},{g}\n" for c, base in [("Fresh", 1000), ("Dairy", 3000)]
+                                          for i, ((m, d), g) in enumerate(zip([(9, 7), (9, 14), (9, 21), (9, 28), (10, 5), (10, 12)], [base + 100 * i * (1 if c == "Fresh" else -1) for i in range(6)])))
+
+
+def upload(w, who, kind, body, **q):
+    params = "&".join(f"{k}={v}" for k, v in {"signal_type": kind, **q}.items())
+    return w.client.post(f"/mi/import?{params}", content=body, headers={**login(w, who), "Content-Type": "text/csv"})
+
+
+def test_mi_import_is_admin_only_and_reports_bad_rows(world):
+    assert upload(world, "md_fruit", "SEARCH", MI_CSV).status_code == 403
+    assert upload(world, "admin", "WEATHER", MI_CSV).status_code == 422
+    r = upload(world, "admin", "SEARCH", MI_CSV + "not-a-week,Fresh,x,1\n")
+    assert r.status_code == 200 and r.json()["loaded"] == 18 and r.json()["errors"][0]["line"] == 20 and r.json()["error_count"] == 1
+    assert any(e["action"] == "MI_IMPORT" for e in world.repo.audit_entries())
+    assert upload(world, "admin", "SEARCH", b"x" * (5 * 1024 * 1024 + 1)).status_code == 413
+
+
+def test_mi_report_is_filtered_to_the_callers_categories(world):
+    assert upload(world, "admin", "SEARCH", MI_CSV).status_code == 200 and upload(world, "admin", "BUYER", MI_DEMAND).status_code == 200
+    admin = world.client.get("/mi/report", headers=login(world, "admin")).json()
+    md = world.client.get("/mi/report", headers=login(world, "md_fruit")).json()
+    assert {h["category"] for h in admin["health"]} == {"Fresh", "Dairy"} and {r["keyword"] for r in admin["radar"]} >= {"dalgi", "mystery"}
+    assert {h["category"] for h in md["health"]} == {"Fresh"} and {r["keyword"] for r in md["radar"]} == {"dalgi"}     # no Dairy, no category-less rows
+    assert next(h for h in md["health"] if h["category"] == "Fresh")["share_pct"] == next(h for h in admin["health"] if h["category"] == "Fresh")["share_pct"]
+    assert world.client.get("/mi/report", headers=login(world, "nobody")).json()["health"] == []
+    assert world.client.get("/mi/report").status_code == 401
+    buyer = world.client.get("/mi/report", headers=login(world, "buyer"))
+    assert buyer.status_code == 200 and not keys_anywhere(buyer.json(), COST_KEYS)
+    seed = next(r for r in md["radar"] if r["keyword"] == "dalgi")
+    assert seed["stage"] == "SEED" and seed["search_series"][-1] == ["2026-10-12", "20"]
+
+
+def test_mi_report_uses_inventory_for_supply_cover(world):
+    upload(world, "admin", "BUYER", MI_DEMAND)
+    fresh = next(h for h in world.client.get("/mi/report", headers=login(world, "admin")).json()["health"] if h["category"] == "Fresh")
+    # inventory: stock 100+300 over daily sales 10+100 = 3.6 days
+    assert fresh["supply"]["cover_days"] == 3.6 and fresh["supply"]["status"] == "BALANCED"

@@ -71,6 +71,19 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"      # put the outp
 - **BUYER responses omit cost and margin keys entirely** (enforced server-side, covered by tests); out-of-scope resources return 404.
 - The dashboard keeps its token in memory only (a reload signs you out). Serve it behind HTTPS if exposed beyond localhost.
 
+## Market intelligence (Category Health + Trend Radar)
+Two extra dashboard tabs built from demand and interest signals you import as CSV/XLSX (see `docs/MI_FRAMEWORK.md`):
+```bash
+python -m marketflow.cli import-mi search_report.csv --type SEARCH     # week,keyword,category,searches,buyers,gmv,unitsold
+python -m marketflow.cli import-mi power_bi.csv     --type BUYER      # month,category,gmv,unitsold  (real demand)
+python -m marketflow.cli import-mi flyers.csv       --type PROMOTION  # week,keyword,category,count   (also PRODUCT, MEDIA, SKU)
+python -m marketflow.cli mi-report                                    # the same analysis as text
+```
+One row per period (and optionally category and keyword); every other numeric column is a metric. Periods may be `2026-10-26`, `20261026`, `202610` or `2026-W43`. Re-importing a period overwrites it. Admins can also `POST /mi/import?signal_type=SEARCH` with the CSV as the body.
+- **Category Health** answers whether real demand (GMV, else units sold) is rising or falling, how demand share moved between categories, whether stock cover is keeping up, and whether search has actually led demand in that category (a lagged-correlation check; otherwise search is labelled interest only).
+- **Trend Radar** gives each keyword a lifecycle stage (Seed / Emerging / Growing / Mainstream / Fading) from its search growth, its volume rank among its category's keywords, and whether product, promotion or media signals corroborate it. Weights and thresholds live in the optional `[mi]` table of `settings.toml`.
+- Users only see categories they are assigned to; rows without a category are admin-only. Nothing here uses cost data.
+
 ## Running unattended (scheduler, alerts, review queue)
 
 ```bash

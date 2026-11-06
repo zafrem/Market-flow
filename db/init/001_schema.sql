@@ -249,3 +249,16 @@ CREATE TABLE IF NOT EXISTS audit_log (
   after_state JSON NULL,
   KEY idx_ts (ts)
 );
+
+CREATE TABLE IF NOT EXISTS mi_observations (
+  obs_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  signal_type ENUM('SEARCH','BUYER','SKU','PRODUCT','PROMOTION','MEDIA') NOT NULL,
+  period_start DATE NOT NULL,
+  category_l VARCHAR(100) NOT NULL DEFAULT '',
+  keyword VARCHAR(100) NOT NULL DEFAULT '',
+  metric VARCHAR(40) NOT NULL,
+  value DECIMAL(20,4) NOT NULL,
+  source VARCHAR(60) NOT NULL DEFAULT '',
+  UNIQUE KEY uq_mi (signal_type, period_start, category_l, keyword, metric),
+  KEY idx_mi_period (signal_type, period_start)
+);
