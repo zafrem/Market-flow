@@ -1,12 +1,14 @@
 # Software Requirements Specification (SRS)
 ## Project: MarketFlow (Multi-Channel Market Analysis & Dynamic Price Optimization System)
 
-**Document Version:** 1.2  
+**Document Version:** 1.3  
 **Target Environment:** Local Dockerized Sandbox & Cloud Infrastructure  
 **Author/Architect:** Development Team / System Architect  
 **Status:** Draft – revised after review; pricing-strategy defaults (F-04-1) and legal review (F-01-2) pending confirmation  
 
 **Revision note (1.2):** Fixed MySQL partition/FK incompatibility, defined the price recommendation algorithm, added product-matching, self-healing validation, execution-mode/approval, RBAC detail, observability NFRs, and reconciled test thresholds.
+
+**Revision note (1.3):** Adds §4 F-08, which incorporates the revised *Competitor Price & Margin Analysis* functional specification (`docs/경쟁사 가격·마진 분석 시스템 기능 명세서 (수정본).md`): P0/P1/P2 phasing, effective purchase price, dual timestamps, match grades, disposal cost and BEP, alert and approval policy. Current status per item, and where today's behavior conflicts with the spec, is in `docs/GAP_ANALYSIS.md`. Existing sections are unchanged; where F-08 differs from them, F-08 states the target and the conflict is listed in the gap analysis.
 
 ---
 
@@ -254,6 +256,66 @@ One crawler per data item (`report`, `buyer`, `news`, `competitor`, `flyer`, `ne
 * **F-07-3 (File inbox):** crawlers whose source has no API import CSV/XLSX files from `inbox/<id>/` (or an admin upload, 5 MB), filing each into `processed/` or `failed/`; client file names are never used on disk.
 * **F-07-4 (News):** counts articles per ISO week that mention each tracked keyword (latest search keywords plus extras); counts only ever grow so a rolling feed window cannot erase history.
 
+### F-08: Competitor Price & Margin Analysis (target requirements from the revised functional specification)
+All figures below are the spec's proposed values and must be confirmed before work starts (spec §9). Status per item: `docs/GAP_ANALYSIS.md`.
+
+**Definitions**
+* **Effective purchase price (실구매가):** shown price − instant discount − public coupon + shipping fee; gift promotions convert to unit price (1+1 = 50% per unit); card/membership-only prices are shown in a separate column. Comparison is on the standard unit price of the effective price.
+* **Net margin rate:** (P − purchase cost − logistics − platform fee − disposal cost) ÷ P. Disposal cost is the category average disposal rate allocated per SKU unless SKU data exists.
+* **BEP quantity:** Q_BEP = Q_current × (P_current − C) ÷ (P_cut − C); "unachievable" when P_cut ≤ C; recomputed on the reduced price when the fee is proportional.
+* **Dual timestamps:** every loaded fact has an *occurred* time and an *ingested* time; snapshots can be read "as known then" or "as known now".
+* **Match grade:** SAME (identical product), SIMILAR (brand or spec differs), SUBSTITUTE (same use). Only human-confirmed SAME matches feed margin simulation and alerts.
+* **Data as-of time** is shown beside every price and margin; values older than twice the collection cycle are marked stale and excluded from alerts.
+
+**Phases**
+| Phase | Scope | Entry condition |
+| :--- | :--- | :--- |
+| P0 | One category, 100–200 top SKUs with manual matches; ERP/own-mall data; target-SKU price crawler; unit conversion; net margin; price-match simulator (fixed volume, BEP); margin defense line; comparison sheet; permissions and audit | Crawling legal review done; ERP cost items defined |
+| P1 | Auto-match + review queue; search-log and promotion-ledger links; backfill; point-in-time snapshots; category classifier; synonym dictionary; keyword calculations; search–sales gap diagnosis; alerts; promotion calendar; price change approval | P0 margin within ±0.5 pp of finance; crawl success ≥ 95% for 2 weeks |
+| P2 | Flyer parser; banner/exhibition collection; new-product detection; discount-period anomaly detection; sales response scenarios | Auto-match precision ≥ 95%; ≥ 12 months of backfilled data |
+
+**Requirements** (IDs follow `docs/GAP_ANALYSIS.md`)
+* **F-08-1 Collection and integration**
+  * F-08-1.1 Per-source connectors with schedules, read-only accounts, retry and alert; last success time and loaded row count shown; source-to-target row difference ≤ 0.1%.
+  * F-08-1.2 Unified schema mapper with versioned rules; unmapped codes listed; unmapped rows excluded from aggregates with their count shown.
+  * F-08-1.3 (P1) Backfill uploader: schema/period/duplicate validation, failed rows downloadable with reasons, re-upload creates no duplicates.
+  * F-08-1.4 (P1) Point-in-time snapshot: restore cost, price and promotion state for any past date; match ERP closing figures on 10 test dates; pre-correction snapshots stay readable.
+  * F-08-1.5 Competitor price crawler for target SKUs: shown price, discount, public coupon, shipping fee, stock-out; request-interval limit; structure-change detection. Core SKUs hourly, others daily. Success ≥ 95% per cycle; failure or structure change alerts within 1 h; 50-sample price accuracy ≥ 99%.
+  * F-08-1.6 (P2) Flyer parser with per-field confidence and a side-by-side review screen; unreviewed data never reaches analysis.
+* **F-08-2 Normalization and matching**
+  * F-08-2.1 Manual SKU matching 1:N with grade, registrant and time; change history; discontinued or URL-changed listings flagged for re-check.
+  * F-08-2.2 Unit conversion to a standard unit; fresh-food attributes (grade, origin, cut) kept; differing attributes cannot be SAME. Error ≤ 1% on 100 samples; unparseable titles listed.
+  * F-08-2.3 Margin simulation and alerts use human-confirmed SAME matches only.
+  * F-08-2.4 (P1) Auto-matching proposes candidates with a score; every candidate needs reviewer approval; precision ≥ 95%, recall ≥ 80%, re-evaluated monthly.
+  * F-08-2.5 (P1) Category classifier to the internal taxonomy; low-confidence items stay unclassified; accuracy ≥ 90% at the lowest level.
+  * F-08-2.6 (P1) Synonym dictionary with change history; changes apply from the next batch and show the number of affected keywords.
+* **F-08-3 Analysis and simulation**
+  * F-08-3.1 Net margin calculator per SKU; SKUs with missing cost items are not calculated and show the reason; ±0.5 pp against finance closing.
+  * F-08-3.2 Price-match simulator: expected net margin and BEP quantity when matching the competitor's effective price; SAME matches only; out-of-stock competitors excluded.
+  * F-08-3.4 Margin defense line: per-category minimum with SKU exceptions, change history, warnings filterable in the sheet.
+  * F-08-3.5 (P2) Sales response scenarios (pessimistic/base/optimistic) from elasticity estimated on past promotions; show the number and span of promotions used; none for SKUs with too little data.
+  * F-08-3.6 (P1) Keyword frequency and share by category with WoW and YoY change.
+  * F-08-3.7 (P1) Search–sales gap diagnosis: high-search, low-conversion keywords get a primary cause in this order — no product, out of stock, price disadvantage, other — with the remaining matches shown as secondary causes; ≥ 85% classification accuracy on 100 samples.
+  * F-08-3.8 (P2) New-product detector; renamed existing products flagged as new ≤ 10%.
+  * F-08-3.9 (P2) Discount anomaly detection: failed promotion (volume below baseline of the previous four weeks, same weekday, seasonally adjusted) and prolonged discount (discount-day share over 90 days above threshold); each detection shows baseline, actual and rationale.
+* **F-08-4 Dashboard and administration**
+  * F-08-4.1 Comparison sheet: own price, competitor effective price and unit price, current margin, expected margin at matching, BEP quantity, match grade, as-of time; sort, filter, export (authorized users only, audited); all target SKUs load in ≤ 3 s.
+  * F-08-4.2 Data source screen: connection state, last success, failure reason, crawl URLs and cycles; URLs validated before saving; changes recorded.
+  * F-08-4.3 (P1) Keyword/status overview with search–sales gap quadrant chart linking to keyword detail.
+  * F-08-4.4 (P1) Promotion calendar with own and competitor promotions on one axis and a year-over-year overlay.
+  * F-08-4.5 (P1) Alerts for reverse-margin risk, competitor lowest-price update and core-keyword stock-out; per-type thresholds; one alert per SKU and type per 24 h; normal severity sent as a daily digest; **alert bodies contain no cost or margin figures, only a link to the screen**.
+  * F-08-4.6 (P1) Price change approval: draft in the sheet → approver review → export after approval; drafts below the defense line need a higher approver; author, approver and evidence snapshot are kept. Automatic write-back to the price system is out of scope (the engine stays advisory; F-04-0 auto-apply is not part of this release).
+* **F-08-N Non-functional**
+  * F-08-N1 Separate permissions for viewing cost/margin, exporting, setting defense lines and approving price changes; company SSO.
+  * F-08-N2 Audit log for views, downloads, setting changes, match changes and approvals with user, time and target; retention per company policy.
+  * F-08-N3 (P1) De-identify search and order logs; filter personal data (phone numbers, addresses) in queries before loading.
+  * F-08-N4 Credentials in a secret store; source systems accessed with read-only accounts.
+  * F-08-N5 Daily data-quality metrics (collection success, load delay, unmapped codes, unit-parse failures, matches to re-check) with operator alerts on threshold breach.
+  * F-08-N6 Staleness: a value older than twice its collection cycle is shown as stale and excluded from alert decisions.
+  * F-08-N7 Dashboard availability 99% in business hours; collection failure never blocks reads.
+  * F-08-N8 Crawl only legally reviewed targets and methods; no login areas, no personal data; request-rate cap.
+
+
 ---
 
 ## 5. Non-Functional & Operational Requirements
@@ -366,3 +428,5 @@ To ensure the system can be validated automatically by an individual developer, 
   * FastAPI query service and personalized Watchlist API endpoints.
   * Responsive Three-Way Comparison Matrix Dashboard UI.
   * End-to-end sandbox verification and containerized deployment dry run.
+* **Phase 5: Competitor Price & Margin Analysis per F-08 (see `docs/GAP_ANALYSIS.md` §8 for the order)**
+  * Resolve spec §9 open items; P0 definition fixes (disposal cost, BEP, alert text, confirmed-SAME rule); effective-price fields and comparison-sheet columns; defense-line and matching screens; dual timestamps; then P1 and P2 in spec order.
