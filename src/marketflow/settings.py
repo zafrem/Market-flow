@@ -39,10 +39,12 @@ class Settings:
     tls_cert: str = ""          # PEM paths: serve HTTPS directly
     tls_key: str = ""
     trust_proxy: str = ""       # IPs/CIDRs of a reverse proxy whose X-Forwarded-For uvicorn may trust (e.g. "127.0.0.1")
+    solo_mode: bool = True      # one person runs the system: they may approve their own proposals and below-defense-line changes
     public_url: str = ""        # dashboard address put in alerts as a link (alerts carry no figures); e.g. https://marketflow.example.com
     inbox_dir: str = "data/inbox"   # file-drop folders for the report/buyer/flyer/new-product crawlers (one subfolder each)
     hsts: bool = False          # send Strict-Transport-Security (also implied by tls_cert); set when a proxy terminates TLS
     decision: Mapping[str, Any] = field(default_factory=dict)   # raw [decision] table
+    quality: Mapping[str, Any] = field(default_factory=dict)    # raw [quality] table (data-quality thresholds)
     mi: Mapping[str, Any] = field(default_factory=dict)         # raw [mi] table (Market Intelligence tunables)
 
     @property
@@ -110,9 +112,11 @@ def load_settings(path: Path | str | None = None, env: Mapping[str, str] | None 
         tls_cert=str(pick("TLS_CERT", "server", "tls_cert", default="")),
         tls_key=str(pick("TLS_KEY", "server", "tls_key", default="")),
         trust_proxy=str(pick("TRUST_PROXY", "server", "trust_proxy", default="")),
+        solo_mode=_truthy(pick("SOLO_MODE", "approval", "solo_mode", default=True)),
         public_url=str(pick("PUBLIC_URL", "server", "public_url", default="")).rstrip("/"),
         inbox_dir=str(pick("CRAWLER_INBOX_DIR", "crawlers", "inbox_dir", default="data/inbox")),
         hsts=_truthy(pick("HSTS", "server", "hsts", default=False)),
         decision=dict(data.get("decision", {})),
+        quality=dict(data.get("quality", {})),
         mi=dict(data.get("mi", {})),
     )

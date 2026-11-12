@@ -102,8 +102,12 @@ def build_scheduler(engine: Engine, s: Settings, tp: TimeProvider, notifier: Not
         prepare_db(engine, tp)
         created = service.run_decisions(repo, s, tp)
         now = tp.now().replace(tzinfo=None)
+        from .crawlers.service import CrawlerService
+        from .quality import alerts_from_quality, load_thresholds, quality_report
+        report = quality_report(repo, CrawlerService(engine, s, tp), load_thresholds(s.quality), now)
         await notifier.dispatch(alerts_from_recommendations(created, s.public_url)
-                                + alerts_from_stockouts(repo.competitor_stockouts(now - timedelta(hours=26))))
+                                + alerts_from_stockouts(repo.competitor_stockouts(now - timedelta(hours=26)))
+                                + alerts_from_quality(report, s.public_url))
 
     async def on_failure(job: Job, exc: Exception) -> None:
         await notifier.dispatch([Alert(f"JOB_FAILED:{job.name}", "RED", f"Scheduled job '{job.name}' failed ({type(exc).__name__}).")])

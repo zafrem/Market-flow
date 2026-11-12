@@ -46,6 +46,7 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
     p = sub.add_parser("import-mi"); p.add_argument("--errors-file", help="write every rejected cell with its reason to this CSV"); p.add_argument("file"); p.add_argument("--type", required=True); p.add_argument("--source", default="")
     p = sub.add_parser("synonym"); p.add_argument("alias"); p.add_argument("canonical", nargs="?"); p.add_argument("--remove", action="store_true")
     p = sub.add_parser("snapshot"); p.add_argument("date"); p.add_argument("--known-at", help="UTC ISO time: what the system knew then")
+    sub.add_parser("quality")
     sub.add_parser("synonyms"); sub.add_parser("classify-eval")
     p = sub.add_parser("mi-report"); p.add_argument("--stable", action="store_true"); p.add_argument("--lang", choices=["en", "ko"], default="en")
     sub.add_parser("crawlers")
@@ -189,6 +190,17 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
                 w.writerows((e.line, e.field, e.message) for e in res.errors)
             print(f"rejected cells written to {a.errors_file}", file=out)
         return 1 if res.errors and res.loaded == 0 else 0
+    if a.cmd == "quality":
+        from .crawlers.service import CrawlerService
+        from .quality import load_thresholds, quality_report
+        rep = quality_report(repo, CrawlerService(engine, settings, tp), load_thresholds(settings.quality), tp.now().replace(tzinfo=None))
+        for c_ in rep["crawlers"]:
+            rate = "n/a" if c_["success_rate"] is None else f"{c_['success_rate'] * 100:.0f}%"
+            print(f"{c_['id']:<17} success {rate:<5} ok={c_['ok']} failed={c_['failed']}{'  STALE' if c_['stale'] else ''}", file=out)
+        print(f"unparseable={rep['unparseable_titles']} unmapped={rep['unmapped_items']} unconfirmed={rep['unconfirmed_matches']} to_recheck={rep['matches_to_recheck']}", file=out)
+        for i in rep["issues"]:
+            print(f"ISSUE {i['code']} {i['subject']}", file=out)
+        return 0
     if a.cmd == "snapshot":
         from .snapshot import snapshot
         try:

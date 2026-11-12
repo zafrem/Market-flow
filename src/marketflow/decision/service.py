@@ -80,12 +80,14 @@ def _move(repo: OpsRepository, tp: TimeProvider, rec_id: int, actor: Actor, expe
     return r
 
 
-def approve(repo: OpsRepository, tp: TimeProvider, rec_id: int, actor: Actor) -> None:
+def approve(repo: OpsRepository, tp: TimeProvider, rec_id: int, actor: Actor, separate_duties: bool = False) -> None:
+    """`separate_duties` (settings: approval.solo_mode = false) adds two rules for a team: the author of a proposal never
+    approves it, and a proposal below the margin defense line needs an ADMIN. A single operator leaves it off."""
     _require_decider(actor)
     flags = _load(repo, rec_id, {"PENDING"})["flags"]
-    if flags.get("author") and flags["author"] == actor.name:
+    if separate_duties and flags.get("author") and flags["author"] == actor.name:
         raise PermissionError("the author of a price change cannot approve it; ask another approver")
-    if flags.get("REQUIRES_ADMIN") and actor.role != "ADMIN":
+    if separate_duties and flags.get("REQUIRES_ADMIN") and actor.role != "ADMIN":
         raise PermissionError("this change is below the margin defense line: an administrator must approve it")
     _move(repo, tp, rec_id, actor, "PENDING", "APPROVED", "RECOMMENDATION_APPROVED")
 
@@ -94,7 +96,8 @@ def create_draft(repo: OpsRepository, settings: Settings, tp: TimeProvider, acto
                  price: int, note: str = "") -> int:
     """A person's own price-change proposal (SRS F-08-4.6). It goes through the same PENDING -> APPROVED -> APPLIED path as
     a machine recommendation, with an evidence snapshot frozen at writing time. A price below the margin defense line
-    (the price floor, or any negative net margin) needs an ADMIN to approve; the author never approves their own draft."""
+    (the price floor, or any negative net margin) is flagged. With separate duties on (a team, not solo mode) that needs an
+    ADMIN to approve and the author never approves their own draft."""
     _require_decider(actor)
     row = repo.inventory_latest(sku, channel)
     if row is None:

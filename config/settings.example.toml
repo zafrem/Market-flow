@@ -22,6 +22,11 @@ hsts = false           # env: HSTS
 public_url = ""        # env: PUBLIC_URL. Dashboard address added to alerts as a link (alerts carry no cost or margin figures)
 trust_proxy = ""       # env: TRUST_PROXY. Reverse proxy address(es), e.g. "127.0.0.1": makes login throttling use the real client IP
 
+[approval]
+# One person runs this (default): you may approve your own proposals, including ones below the margin defense line.
+# Set false for a team: authors cannot approve their own proposals and below-defense-line changes need an ADMIN.
+solo_mode = true       # env: SOLO_MODE
+
 [alerts]
 # Slack-compatible incoming webhook (https). Alerts carry margin data: point it at a channel only MD/ADMIN can read.
 webhook_url = ""       # env: ALERT_WEBHOOK_URL
@@ -57,6 +62,13 @@ api_key = ""           # env: GARAK_API_KEY
 # alert_margin_pct = 10            # LOW_MARGIN flag at or below this net margin
 # disposal_rate_pct = 0            # category average write-off, % of purchase cost; a per-SKU disposal_cost in the ERP file wins
 # require_confirmed_match = true   # only competitor listings a person graded SAME (Matches) drive prices and alerts
+
+[quality]              # daily data-quality thresholds; breaches raise DATA_QUALITY alerts (every key optional)
+# min_success_rate = 0.95      # share of finished crawler runs (7 days) that succeeded
+# max_unparseable = 20         # open titles whose quantity/unit could not be read
+# max_unmapped = 50            # open titles / benchmark items that match nothing in the catalog
+# max_unconfirmed = 100        # competitor listings waiting to be graded
+# max_recheck = 10             # confirmed listings not seen for 7 days
 
 [mi]                   # Market Intelligence (Category Health + Trend Radar); every key is optional
 # min_periods = 4              # observations a keyword needs before it gets a lifecycle stage

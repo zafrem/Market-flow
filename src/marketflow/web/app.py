@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.engine import Engine
 
 from .. import curation, matching
+from ..quality import load_thresholds, quality_report
 from ..snapshot import snapshot as take_snapshot
 from ..db import init_sqlite, make_engine
 from ..decision import service
@@ -268,7 +269,10 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
         if rec is None or info is None or not in_scope(user.scope, info["category_l"], info["category_m"]):
             raise HTTPException(404, "recommendation not found")       # out-of-scope looks the same as absent
         try:
-            getattr(service, action)(repo, tp, rec_id, Actor(user.email, user.role))
+            if action == "approve":
+                service.approve(repo, tp, rec_id, Actor(user.email, user.role), separate_duties=not settings.solo_mode)
+            else:
+                getattr(service, action)(repo, tp, rec_id, Actor(user.email, user.role))
         except PermissionError as e:
             raise HTTPException(403, str(e)) from e
         except WorkflowError as e:
@@ -379,6 +383,10 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
         repo.audit(admin.email, "MI_IMPORT", None, {"signal_type": signal_type.upper(), "loaded": res.loaded, "errors": len(res.errors), "pii_skipped": res.pii_skipped}, now())
         return {"loaded": res.loaded, "pii_skipped": res.pii_skipped, "classified": res.classified, "unclassified": res.unclassified, "errors": [{"line": e.line, "field": e.field, "message": e.message} for e in res.errors[:50]],
                 "error_count": len(res.errors)}
+
+    @app.get("/quality")
+    def data_quality(_: CurrentUser = Depends(require_decider)):
+        return quality_report(repo, crawlers, load_thresholds(settings.quality), now())
 
     # ---- keyword dictionary: synonyms (admin edits, MD/ADMIN read) and the category classifier -------------------------------
     @app.get("/mi/synonyms")

@@ -32,7 +32,7 @@ KIM, LEE, ROOT, BUYER = Actor("kim@x.com", "MD"), Actor("lee@x.com", "MD"), Acto
 def env(tmp_path, monkeypatch):
     monkeypatch.setattr("marketflow.web.security._N", 2 ** 4)
     tp = FixedTimeProvider(T0)
-    s = Settings(database_url=f"sqlite:///{tmp_path / 'w.db'}", jwt_secret="j" * 48, inbox_dir=str(tmp_path / "inbox"))
+    s = Settings(database_url=f"sqlite:///{tmp_path / 'w.db'}", jwt_secret="j" * 48, inbox_dir=str(tmp_path / "inbox"), solo_mode=False)
     e = make_engine(s.database_url)
     init_sqlite(e)
     repo = AppRepository(e)
@@ -56,8 +56,8 @@ def test_a_draft_above_the_defense_line_needs_one_other_approver(env):
     assert ev["note"] == "match the market" and ev["current_price"] == 10000 and ev["proposed_price"] == 9500 and ev["floor"] == floor_of(env)
     assert ev["as_of"]["inventory_date"] == "2026-11-03" and f["metrics"]["match_simulation"]["bep_status"] == "OK"
     with pytest.raises(PermissionError, match="author"):
-        service.approve(env.repo, env.tp, rid, KIM)                  # no self-approval
-    service.approve(env.repo, env.tp, rid, LEE)
+        service.approve(env.repo, env.tp, rid, KIM, separate_duties=True)                  # no self-approval
+    service.approve(env.repo, env.tp, rid, LEE, separate_duties=True)
     service.apply(env.repo, env.tp, rid, LEE)
     assert env.repo.live_price("APPLE-1", "SHOPA") == 9500
     assert {"DRAFT_CREATED", "RECOMMENDATION_APPROVED", "PRICE_APPLIED"} <= {a["action"] for a in env.repo.audit_entries()}
@@ -69,8 +69,8 @@ def test_a_draft_below_the_defense_line_needs_an_administrator(env):
     flags = env.repo.get_recommendation(rid)["flags"]
     assert flags["BELOW_DEFENSE_LINE"] is True and flags["REQUIRES_ADMIN"] is True
     with pytest.raises(PermissionError, match="administrator"):
-        service.approve(env.repo, env.tp, rid, LEE)                  # another MD is not enough
-    service.approve(env.repo, env.tp, rid, ROOT)
+        service.approve(env.repo, env.tp, rid, LEE, separate_duties=True)    # another MD is not enough
+    service.approve(env.repo, env.tp, rid, ROOT, separate_duties=True)
     assert env.repo.get_recommendation(rid)["status"] == "APPROVED"
 
 
@@ -152,3 +152,30 @@ def test_snapshot_api_cli_scope_and_audit(api):
     out = io.StringIO()
     assert cli.main(["snapshot", "2026-11-03", "--known-at", "2026-11-03T02:00:00"], settings=env.s, tp=env.tp, out=out) == 0
     assert "APPLE-1/SHOPA" in out.getvalue() and "known since 2026-11-03" in out.getvalue()
+
+
+def test_solo_mode_lets_one_person_propose_approve_and_apply_even_below_the_line(env):
+    """The default: a single operator analyses and decides alone. The proposal is still flagged and audited."""
+    low = floor_of(env) - 100
+    rid = service.create_draft(env.repo, env.s, env.tp, KIM, "APPLE-1", "SHOPA", low, "clearance")
+    assert env.repo.get_recommendation(rid)["flags"]["BELOW_DEFENSE_LINE"] is True
+    service.approve(env.repo, env.tp, rid, KIM)                                # same person, MD role, below the line: allowed
+    service.apply(env.repo, env.tp, rid, KIM)
+    assert env.repo.live_price("APPLE-1", "SHOPA") == low
+    assert {"DRAFT_CREATED", "RECOMMENDATION_APPROVED", "PRICE_APPLIED"} <= {a["action"] for a in env.repo.audit_entries()}
+
+
+def test_solo_setting_is_on_by_default_and_overridable_from_the_environment(tmp_path):
+    from marketflow.settings import load_settings
+    assert Settings().solo_mode is True
+    assert load_settings(tmp_path / "none.toml", env={"SOLO_MODE": "false"}).solo_mode is False
+
+
+def test_api_follows_the_setting(env):
+    for key, role in (("kim", "MD"),):
+        env.repo.set_assignments(env.repo.create_user(f"{key}@x.com", key, role, hash_password("correct-horse-battery")), [("Fresh", "Fruit")])
+    from dataclasses import replace
+    solo = TestClient(create_app(replace(env.s, solo_mode=True), env.e, env.tp))
+    h = {"Authorization": "Bearer " + solo.post("/auth/login", json={"email": "kim@x.com", "password": "correct-horse-battery"}).json()["access_token"]}
+    rid = solo.post("/recommendations/draft", json={"internal_sku": "APPLE-1", "channel_name": "SHOPA", "price": 9000}, headers=h).json()["rec_id"]
+    assert solo.post(f"/recommendations/{rid}/approve", headers=h).status_code == 200
