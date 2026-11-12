@@ -81,7 +81,11 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"      # put the outp
 - Upgrading an existing MySQL: run `db/migrations/002_price_margin_p0.sql` once (SQLite adds the columns by itself).
 
 ## Vision (ChatGPT / OpenAI API)
-Image reading (competitor flyers, banners) is configured to use the OpenAI API. Put the key in `config/settings.toml` under `[vision] openai_api_key` (file mode 600, git-ignored) or in the environment as `OPENAI_API_KEY` (and optionally `OPENAI_MODEL`, default `gpt-4o-mini`; use any vision-capable model on your account). In Docker, set `OPENAI_API_KEY` in `.env`. `python -m marketflow.worker --check` prints `vision_enabled=True/False` and never prints the key. The key setting is in place; the flyer-reading step that calls the API is not built yet, so nothing is sent to OpenAI today.
+Competitor flyers and banners are read with the OpenAI API. Put the key in `config/settings.toml` under `[vision] openai_api_key` (file mode 600, git-ignored) or in the environment as `OPENAI_API_KEY` (optionally `OPENAI_MODEL`, default `gpt-4o-mini`; use any vision-capable model on your account). In Docker, set `OPENAI_API_KEY` in `.env`. `python -m marketflow.worker --check` prints `vision_enabled=True/False` and never prints the key.
+
+How it works: drop PNG/JPEG/WebP files (max 5 MB each) in `data/inbox/flyer/`. On the flyer crawler's schedule (or **Run now**), each image is sent to OpenAI, which returns the advertised product names and prices. Every product becomes one PROMOTION mention for the week (category from the keyword classifier when it knows one). Read images move to `processed/`, unreadable ones to `failed/`; at most `max_images` (default 10) are read per run. CSV/XLSX flyer files still work as before.
+
+What leaves your machine: the image, and only while the flyer crawler is enabled and a key is set. Without a key the images stay in the inbox. The type is checked from the file bytes, rows with personal data (phone, e-mail, address) are dropped, and the key and the API's response bodies are never logged. This path is covered by offline tests with a fake API; it has not been run against the live OpenAI API.
 
 ## Market intelligence (Category Health + Trend Radar)
 Two extra dashboard tabs built from demand and interest signals you import as CSV/XLSX (see `docs/MI_FRAMEWORK.md`):
@@ -105,7 +109,7 @@ Dashboard > **Crawlers** (administrators change things, MDs can look). Every dat
 | `buyer` | internal sales (BUYER) | file inbox (Power BI export) |
 | `news` | news mentions (MEDIA) | fetches the RSS/Atom feeds you list; counts articles per week per tracked keyword |
 | `competitor` | competitor prices | the retail scraper with self-healing selectors (`config/extraction.json`) |
-| `flyer`, `newproduct` | promotion / new-product signals | file inbox (flyer OCR and the Kurly collection happen outside; their output goes in the inbox) |
+| `flyer`, `newproduct` | promotion / new-product signals | file inbox (flyer images are read with the OpenAI API; the Kurly collection happens outside and its output goes in the inbox) |
 | `benchmark_kamis`, `benchmark_garak` | public wholesale prices | the KAMIS / Garak APIs |
 
 File crawlers read `data/inbox/<id>/*.csv|xlsx` (`[crawlers] inbox_dir`), move each file to `processed/` or `failed/`, and ignore symlinks. The worker (`python -m marketflow.worker`) runs every enabled crawler at its times and picks up "Run now" requests within about 30 seconds. `python -m marketflow.cli crawlers` lists them, `crawler-run ID` runs one in the current process. In Docker the worker and API share `./inbox`.

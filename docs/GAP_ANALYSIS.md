@@ -17,7 +17,7 @@ MarketFlow already covers most of the P0 *mechanics* (ERP import, unit conversio
 | F-08-1.3 | Batch backfill uploader with validation, idempotent re-upload | P1 | Partial | MI import is an idempotent upsert with line-numbered errors (CSV/XLSX, 5 MB). Sales/discount history backfill and a downloadable failure file do not exist. |
 | F-08-1.4 | Point-in-time snapshot with dual timestamps (occurred vs. ingested) | P1 | Missing | Tables carry only the occurrence date (`recorded_date`, `scraped_at`). There is no ingestion time, so "what we knew on date X" cannot be reproduced and retroactive cost corrections overwrite history. |
 | F-08-1.5 | Competitor price crawler: price, discount, **coupon, shipping fee**, stock; change detection | P0 | Partial | Collects sale/original price, badge, stock; self-healing detects structure changes and alerts. Coupon and shipping fields are not stored. Cadence is 3×/day, not hourly for core SKUs. Success-rate (95%) and sample-accuracy (99%) are not measured. |
-| F-08-1.6 | Competitor flyer parser (image/PDF, field confidence, side-by-side review) | P2 | Missing | Flyer OCR happens outside; its output enters through the `flyer` file inbox as promotion counts. No parser, no review screen. |
+| F-08-1.6 | Competitor flyer parser (image/PDF, field confidence, side-by-side review) | P2 | Missing | **Now:** flyer images dropped in the inbox are read with the OpenAI API into weekly PROMOTION mentions (names, prices not stored); no PDF, no per-field confidence or side-by-side review. Previously flyer OCR happened outside; its output enters through the `flyer` file inbox as promotion counts. No parser, no review screen. |
 
 ## 3. Module 2: Normalization and matching
 

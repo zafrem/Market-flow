@@ -15,7 +15,8 @@ from ..schedule import latest_slot
 from ..settings import ROOT, Settings
 from ..time_provider import TimeProvider
 from ..transport import Transport
-from .adapters import BenchmarkCrawler, CompetitorCrawler, InboxCrawler, NewsCrawler
+from ..vision import OpenAIVision
+from .adapters import BenchmarkCrawler, CompetitorCrawler, FlyerCrawler, InboxCrawler, NewsCrawler
 from .base import Crawler, NotConfigured, RunOutcome, clean_config, parse_times, to_time
 from .store import CrawlerStore
 
@@ -38,7 +39,8 @@ class CrawlerService:
         mi = MiStore(engine)
         self._mi = mi
         root = resolve_inbox(settings.inbox_dir)
-        crawlers: list[Crawler] = [InboxCrawler(cid, sig, times, root, mi, tp) for cid, sig, times in INBOX]
+        crawlers: list[Crawler] = [InboxCrawler(cid, sig, times, root, mi, tp) for cid, sig, times in INBOX if cid != "flyer"]
+        crawlers.append(FlyerCrawler(root, mi, tp, OpenAIVision(settings.openai_api_key, settings.openai_model) if settings.vision_enabled else None))
         crawlers.append(NewsCrawler(mi, transport, tp))
         crawlers.append(CompetitorCrawler(engine, transport, tp, llm_factory or (lambda: None)))
         crawlers.append(BenchmarkCrawler("benchmark_kamis", KamisCollector(transport, tp, settings.kamis_api_key, settings.kamis_api_id, settings.kamis_product_cls)
@@ -92,7 +94,7 @@ class CrawlerService:
         out.update({"config": eff["config"], "fields": [{"key": f.key, "kind": f.kind, "max": f.max} for f in c.fields],
                     "default_times": list(c.default_times), "runs": runs, "last_success": self.store.last_success(cid)})
         if isinstance(c, InboxCrawler):
-            out["inbox"] = {"path": str(c.dir), "pending": [f.name for f in c.pending()]}
+            out["inbox"] = {"path": str(c.dir), "pending": [f.name for f in c.pending() + (c.pending_images() if isinstance(c, FlyerCrawler) else [])]}
         if isinstance(c, CompetitorCrawler):
             out["platforms"] = {p: {"access_method": r.get("access_method"), "legal_review": bool((r.get("legal_review_ref") or "").strip()), "urls": len(r.get("urls", []))}
                                 for p, r in c.platforms().items()}

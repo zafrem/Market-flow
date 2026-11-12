@@ -121,7 +121,7 @@ The dashboard is bilingual (English / Korean): static `data-i18n` attributes plu
 
 - The revised price/margin functional specification (SRS F-08) is only partly implemented; see [GAP_ANALYSIS.md](GAP_ANALYSIS.md) for what is missing and which behaviors conflict with it.
 - The worker is single-instance by design; the login throttle is per process.
-- Hive and Power BI have no direct connector (file inbox); flyer OCR and the Kurly new-product collection happen outside MarketFlow and feed the inbox.
+- Hive and Power BI have no direct connector (file inbox); the Kurly new-product collection happens outside MarketFlow and feed the inbox.
 - Not verified in CI: the Docker images, live KAMIS/Garak/Gemini/Slack, real RSS feeds, and the dashboard in a real browser.
 - To add a data source: implement a `Crawler` in `crawlers/adapters.py`, register it in `CrawlerService.registry` (with its `ORDER` position), add translations for its labels in `web/static/i18n.js`, and add a test in `tests/test_crawlers.py`.
 - To add a pricing rule: extend `decision/engine.py`, give it a reason code, and add the code to `i18n.js`.

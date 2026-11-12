@@ -47,7 +47,7 @@ Rules to explain to users: buyers never see cost or margin; MDs can approve and 
 6. Mistake? `cli revert ID --as kim:MD` (audited).
 
 ### 3.3 Market intelligence (weekly or monthly)
-1. Get the data: search report (Hive export) → `report` crawler; Power BI monthly export → `buyer`; flyer OCR output → `flyer`; new-product list → `newproduct`.
+1. Get the data: search report (Hive export) → `report` crawler; Power BI monthly export → `buyer`; flyer images (PNG/JPEG/WebP, read with the OpenAI API) or OCR output (CSV) → `flyer`; new-product list → `newproduct`.
 2. Drop the CSV/XLSX in `data/inbox/<crawler>/` or upload on that crawler's page. One row per period (and optionally category and keyword); other numeric columns become metrics. Accepted periods: `2026-10-26`, `20261026`, `202610`, `2026-W43`. Re-importing a period overwrites it.
 3. Direct import is also available: `cli import-mi file.csv --type SEARCH|BUYER|SKU|PRODUCT|PROMOTION|MEDIA`.
 4. Read the result: dashboard tabs *Category health* and *Trend radar*, or `cli mi-report --lang ko`.
