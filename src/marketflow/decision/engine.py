@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from .calc import INF, net_margin, q2, round_price, run_rate, spoilage_risk
+from .calc import INF, disposal_cost, net_margin, q2, round_price, run_rate, simulate_price_match, spoilage_risk
 from .config import DecisionConfig
 
 
@@ -35,6 +35,7 @@ def usable_competitors(ctx: Context, cfg: DecisionConfig, now: datetime) -> list
     cutoff = now - timedelta(hours=float(cfg.competitor_max_age_hours))
     return [c for c in ctx.competitors
             if c["match_confidence"] >= cfg.min_match_confidence and c["scraped_at"] >= cutoff]
+    # (confirmed-match filtering happens where the snapshots are loaded: competitor_snapshots(confirmed_only=...))
 
 
 def evaluate(row: dict[str, Any], ctx: Context, cfg: DecisionConfig, now: datetime) -> Recommendation | None:
@@ -43,8 +44,10 @@ def evaluate(row: dict[str, Any], ctx: Context, cfg: DecisionConfig, now: dateti
     stock = int(row["stock_qty"])
     rr = run_rate(stock, ctx.recent_daily_sales)
     life = row.get("lifecycle_metric") or {}
+    disposal = disposal_cost(row["purchase_cost"], row.get("disposal_cost"), cfg.disposal_rate_pct)
     margin_amt, margin_rate = net_margin(current, row["purchase_cost"], row["fixed_cost"], row["logistics_cost"],
-                                         row["promo_cost"], row["channel_fee_rate"], bool(row["vat_inclusive"]), cfg.vat_rate)
+                                         row["promo_cost"], row["channel_fee_rate"], bool(row["vat_inclusive"]), cfg.vat_rate,
+                                         disposal=disposal)
     flags: dict[str, Any] = {"metrics": {
         "margin_amount": str(margin_amt), "margin_rate": str(margin_rate),
         "run_rate_days": "INFINITE" if rr == INF else str(q2(rr)), "remaining_days": life.get("remaining_days"),
@@ -83,6 +86,13 @@ def evaluate(row: dict[str, Any], ctx: Context, cfg: DecisionConfig, now: dateti
                 and ctx.wholesale_change_pct > cfg.wholesale_rise_threshold_pct:
             suggested, reason = current, "WHOLESALE_GUARD"
             flags["WHOLESALE_GUARD"] = str(ctx.wholesale_change_pct)
+
+    if competitive is not None:          # what matching the competitor's effective price would do (F-08-3.2)
+        cost = {"purchase": row["purchase_cost"], "packaging": row["fixed_cost"], "logistics": row["logistics_cost"],
+                "promo": row["promo_cost"], "fee_pct": row["channel_fee_rate"], "disposal": disposal}
+        weekly = Decimal(sum(ctx.recent_daily_sales[:3])) / max(1, len(ctx.recent_daily_sales[:3])) * 7
+        flags["metrics"]["match_simulation"] = simulate_price_match(
+            current, max(floor, round_price(competitive, cfg.round_to)), weekly, cost, bool(row["vat_inclusive"]), cfg.vat_rate)
 
     # F-04-3 supply vacuum: only when spoilage is NOT flagged and we are not about to cut the price
     oos = [c for c in comps if c["is_out_of_stock"]]

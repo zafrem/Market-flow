@@ -32,6 +32,7 @@ function boot({ role = "MD", routes = {} } = {}) {
       { cand_id: 2, platform: "SHOPA", status: "APPROVED", selectors: { item: "li.old", fields: { title: { css: "a" }, sale_price: { css: "i" } } } }] }],
     "GET /mi/report": () => [200, { health: [], radar: [], as_of: null, signals: [] }],
     "GET /crawlers": () => [200, { crawlers: [] }],
+    "GET /matches": () => [200, { matches: [] }],
     ...routes,
   };
   const dom = new JSDOM(html, { runScripts: "outside-only", url: "http://localhost/" });
@@ -41,7 +42,7 @@ function boot({ role = "MD", routes = {} } = {}) {
     calls.push({ method, path, auth: (opts.headers || {}).Authorization, body: opts.body });
     const handler = table[key] || (method !== "GET" ? () => [200, { ok: true }] : () => [404, { detail: "no route " + key }]);
     const [status, body] = handler();
-    return { ok: status < 400, status, statusText: String(status), json: async () => body };
+    return { ok: status < 400, status, statusText: String(status), json: async () => body, text: async () => (typeof body === "string" ? body : JSON.stringify(body)) };
   };
   w.alert = () => { throw new Error("alert() must not be used"); };
   w.eval(js);
@@ -63,7 +64,7 @@ test("MD login shows the matrix with cost column and colored margin", async () =
   const cells = [...t.d.querySelectorAll("#matrix-table tbody tr")[0].children].map(text);
   const fig = (i) => text(t.d.querySelectorAll("#matrix-table tbody tr")[0].children[i].querySelector(".val b"));
   assert.match(cells[0], /^Apple/); assert.equal(fig(2), "523"); assert.equal(fig(3), "10,000");
-  assert.match(cells[4], /15\.85%/); assert.match(cells[5], /8,400/); assert.match(cells[5], /1\/2 out of stock/); assert.match(cells[6], /D-2/);
+  assert.match(cells[4], /15\.85%/); assert.match(cells[5], /8,400/); assert.match(cells[5], /1\/2 out of stock/); assert.match(cells[7], /D-2/);
   assert.ok(t.d.querySelector("#matrix-table tbody td.green"));
   assert.equal(t.d.querySelector("th.cost").hidden, false);
 });
@@ -435,4 +436,61 @@ test("crawler pages follow the language switch and deep links open the right pag
   assert.deepEqual([...t.d.querySelectorAll("#crawler-list button")].map(text), ["검색 리포트● 정상", "뉴스○ 설정 필요", "경쟁사 가격✖ 실패 중"]);
   assert.match(text(t.d.querySelector("#crawler-page")), /설정에서 RSS\/Atom 피드 주소를 하나 이상 추가하세요/);
   assert.match(text(t.d.querySelector('nav button[data-tab="crawlers"]')), /크롤러/);
+});
+
+// ---- price/margin P0: matched-price simulation, comparison export, product matches -------------------------------------
+const SIM = { target_price: 8400, expected_margin_rate: "5.20", expected_margin_amount: "400.00", bep_units: "113", bep_status: "OK", below_floor: false };
+const withSim = (sim, extra = {}) => ({ "GET /matrix": () => [200, { rows: [{ ...ROW("Apple", { ...FULL, match_simulation: sim }), competitors: { listings: 1, unconfirmed: 2, out_of_stock: 0, lowest_pack_price: "8400.00" }, ...extra }] }] });
+
+test("matrix shows the margin and break-even volume if we match, and how many listings are not confirmed", async () => {
+  const t = boot({ routes: withSim(SIM) }); await t.login();
+  const cell = firstRow(t).querySelector("td.matched");
+  assert.match(text(cell), /5\.20%/); assert.match(text(cell), /break-even 113\/wk/);
+  assert.match(text(firstRow(t)), /2 not confirmed/);
+  const none = boot({ routes: withSim(null) }); await none.login();
+  assert.equal(text(firstRow(none).querySelector("td.matched")), "–");
+  const flo = boot({ routes: withSim({ ...SIM, bep_status: "UNACHIEVABLE", bep_units: null, below_floor: true }) }); await flo.login();
+  assert.match(text(firstRow(flo).querySelector("td.matched")), /no margin at that price · below floor/);
+});
+
+test("BUYER sees no margin simulation column or export", async () => {
+  const t = boot({ role: "BUYER" }); await t.login();
+  assert.equal(firstRow(t).querySelector("td.matched").hidden, true);
+  assert.equal(t.d.querySelector("#export-matrix").closest(".decider").hidden, true);
+  assert.equal(t.d.querySelector('nav button[data-tab="matches"]').hidden, true);
+});
+
+test("comparison export is fetched with the token and saved as a file", async () => {
+  const t = boot({ routes: { "GET /matrix/export": () => [200, "item,category\nApple,Fresh\n"] } });
+  let blob = null, name = null;
+  t.w.URL.createObjectURL = (b) => { blob = b; return "blob:x"; }; t.w.URL.revokeObjectURL = () => {};
+  t.w.HTMLAnchorElement.prototype.click = function () { name = this.download; };
+  await t.login(); await t.click(t.d.querySelector("#export-matrix"));
+  assert.equal(name, "marketflow-comparison.csv");
+  const csv = await new Promise((res) => { const fr = new t.w.FileReader(); fr.onload = () => res(fr.result); fr.readAsText(blob); });
+  assert.match(csv, /Apple,Fresh/);
+  assert.equal(t.calls.find((c) => c.path === "/matrix/export").auth, "Bearer tok123");
+  const denied = boot({ routes: { "GET /matrix/export": () => [403, { detail: "MD or admin only" }] } });
+  denied.w.URL.createObjectURL = () => { throw new Error("no file expected"); };
+  await denied.login(); await denied.click(denied.d.querySelector("#export-matrix"));
+  assert.match(text(denied.d.querySelector("#toast")), /MD or admin only/);
+});
+
+test("product matches: list, confirm with a grade, remove", async () => {
+  const m = (code, extra) => ({ platform: "SHOPA", channel_item_code: code, std_item_id: 1, item_name: "Apple", product_title: "사과 " + code, match_grade: "SAME", match_confidence: "0.900", reviewed_at: null, confirmed: false, ...extra });
+  const t = boot({ routes: { "GET /matches": () => [200, { matches: [m("X1"), m("X2", { reviewed_at: "2026-11-03 01:00:00", confirmed: true })] }] } });
+  await t.login();
+  const rows = t.d.querySelectorAll("#matches-table tbody tr");
+  assert.equal(rows.length, 2);
+  assert.match(text(rows[0]), /needs review/); assert.match(text(rows[1]), /confirmed/);
+  assert.match(text(t.d.querySelector('nav button[data-tab="matches"] .badge')), /1/);               // one listing waits for a person
+  const sel = rows[0].querySelector("select"); sel.value = "SIMILAR";
+  await t.click([...rows[0].querySelectorAll("button")].find((b) => text(b) === "confirm"));
+  const put = t.calls.find((c) => c.method === "PUT" && c.path === "/matches/SHOPA/X1");
+  assert.deepEqual(JSON.parse(put.body), { std_item_id: 1, grade: "SIMILAR" });
+  await t.click([...rows[1].querySelectorAll("button")].find((b) => text(b) === "remove"));
+  assert.ok(t.calls.some((c) => c.method === "DELETE" && c.path === "/matches/SHOPA/X2"));
+  await t.click(t.d.querySelector("#lang"));
+  assert.match(text(t.d.querySelector('nav button[data-tab="matches"]')), /상품 매칭/);
+  assert.match(text(t.d.querySelector("#matches-table tbody")), /검토 필요/);
 });

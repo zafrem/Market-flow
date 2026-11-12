@@ -102,7 +102,7 @@ def build_scheduler(engine: Engine, s: Settings, tp: TimeProvider, notifier: Not
         prepare_db(engine, tp)
         created = service.run_decisions(repo, s, tp)
         now = tp.now().replace(tzinfo=None)
-        await notifier.dispatch(alerts_from_recommendations(created)
+        await notifier.dispatch(alerts_from_recommendations(created, s.public_url)
                                 + alerts_from_stockouts(repo.competitor_stockouts(now - timedelta(hours=26))))
 
     async def on_failure(job: Job, exc: Exception) -> None:
@@ -116,7 +116,7 @@ async def main(argv: list[str]) -> int:
     settings = load_settings()
     if "--check" in argv:
         print(settings)
-        print(f"kamis_enabled={settings.kamis_enabled} garak_enabled={settings.garak_enabled}")
+        print(f"kamis_enabled={settings.kamis_enabled} garak_enabled={settings.garak_enabled} vision_enabled={settings.vision_enabled}")
         return 0
     tp, engine, transport = SystemTimeProvider(), make_engine(settings.database_url), HttpTransport()
     try:

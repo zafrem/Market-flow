@@ -20,23 +20,31 @@ def net_price(price: int | Decimal, vat_inclusive: bool, vat_rate: Decimal) -> D
     return p / (1 + vat_rate) if vat_inclusive else p
 
 
+def disposal_cost(purchase_cost: Decimal, sku_disposal: Decimal | None, rate_pct: Decimal) -> Decimal:
+    """Per-unit disposal (write-off) cost: the SKU's own figure when the ERP supplies one, otherwise the category
+    average disposal rate applied to the purchase cost."""
+    return sku_disposal if sku_disposal is not None else purchase_cost * rate_pct / 100
+
+
 def net_margin(price: int | Decimal, cogs: Decimal, packaging: Decimal, logistics: Decimal, promo: Decimal,
-               fee_pct: Decimal, vat_inclusive: bool, vat_rate: Decimal) -> tuple[Decimal, Decimal]:
-    """(margin amount, margin rate %). Commission is charged on the shown (VAT-inclusive) price."""
+               fee_pct: Decimal, vat_inclusive: bool, vat_rate: Decimal,
+               disposal: Decimal = Decimal(0)) -> tuple[Decimal, Decimal]:
+    """(margin amount, margin rate %). Commission is charged on the shown (VAT-inclusive) price.
+    margin = net price - (purchase + packaging + logistics + promo + disposal + commission)."""
     p = Decimal(price)
     pn = net_price(p, vat_inclusive, vat_rate)
-    amount = pn - (cogs + packaging + logistics + promo + p * fee_pct / 100)
+    amount = pn - (cogs + packaging + logistics + promo + disposal + p * fee_pct / 100)
     return q2(amount), (q2(amount / pn * 100) if pn else Decimal(0))
 
 
 def price_floor(cogs: Decimal, packaging: Decimal, logistics: Decimal, promo: Decimal, fee_pct: Decimal,
-                vat_inclusive: bool, cfg: DecisionConfig) -> int:
+                vat_inclusive: bool, cfg: DecisionConfig, disposal: Decimal = Decimal(0)) -> int:
     """Lowest integer price whose net margin >= target_min_margin_pct (default: break-even)."""
     t, f = cfg.target_min_margin_pct / 100, fee_pct / 100
     k = (1 - t) / (1 + cfg.vat_rate) if vat_inclusive else (1 - t)
     if k <= f:
         raise ValueError("channel fee + target margin leave no feasible price")
-    costs = cogs + packaging + logistics + promo
+    costs = cogs + packaging + logistics + promo + disposal
 
     def ok(price: int) -> bool:
         pn = net_price(price, vat_inclusive, cfg.vat_rate)
@@ -66,3 +74,28 @@ def spoilage_risk(stock: int, remaining_days: int | None, rr: Decimal, buffer_da
 
 def round_price(x: Decimal, tick: int) -> int:
     return int((x / tick).quantize(Decimal(1), rounding=ROUND_HALF_UP)) * tick
+
+
+def simulate_price_match(current: int, target: int, weekly_units: Decimal, cost: dict, vat_inclusive: bool,
+                         vat_rate: Decimal) -> dict:
+    """What matching a competitor's price would do (spec F-08-3.2): expected margin at `target` and, for a cut, the
+    weekly volume needed to earn the same total margin as today.
+
+        BEP units = weekly units x (margin per unit now) / (margin per unit at the new price)
+
+    The margin per unit is computed at each price, so a commission proportional to the price is handled. A cut that
+    leaves no margin is UNACHIEVABLE; a price that is not a cut (or a SKU that earns nothing today) has no BEP."""
+    args = (cost["purchase"], cost["packaging"], cost["logistics"], cost["promo"], cost["fee_pct"], vat_inclusive, vat_rate)
+    m_now, rate_now = net_margin(current, *args, disposal=cost["disposal"])
+    m_new, rate_new = net_margin(target, *args, disposal=cost["disposal"])
+    out: dict = {"target_price": int(target), "expected_margin_amount": str(m_new), "expected_margin_rate": str(rate_new),
+                 "bep_units": None, "bep_status": "NOT_A_CUT"}
+    if target < current:
+        if m_new <= 0:
+            out["bep_status"] = "UNACHIEVABLE"
+        elif m_now <= 0:
+            out["bep_status"] = "NO_CURRENT_MARGIN"
+        else:
+            out["bep_units"] = str(int((weekly_units * m_now / m_new).to_integral_value(rounding="ROUND_CEILING")))
+            out["bep_status"] = "OK"
+    return out

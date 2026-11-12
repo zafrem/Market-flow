@@ -28,10 +28,11 @@ _INSERT_RETAIL = text(
     """
     INSERT INTO ext_retail_prices
       (scraped_at, platform, std_item_id, match_confidence, channel_item_code, product_title, original_price,
-       sale_price, normalized_unit_price, is_out_of_stock, badge_info, extraction_source, region_code)
+       sale_price, normalized_unit_price, is_out_of_stock, badge_info, extraction_source, region_code,
+       coupon_discount, shipping_fee, bonus_qty, effective_unit_price)
     VALUES (:scraped_at, :platform, :std_item_id, :match_confidence, :channel_item_code, :product_title,
             :original_price, :sale_price, :normalized_unit_price, :is_out_of_stock, :badge_info,
-            :extraction_source, :region_code)
+            :extraction_source, :region_code, :coupon_discount, :shipping_fee, :bonus_qty, :effective_unit_price)
     """
 )
 
@@ -109,14 +110,39 @@ class SqlRepository:
                                   "channel_item_code = :c ORDER BY scraped_at DESC LIMIT 1"),
                              {"p": platform, "c": code}).scalar()
 
+    def propose_matches(self, rows: list[dict[str, Any]], now: datetime) -> int:
+        """Register scraped listings as UNCONFIRMED match candidates (existing rows, confirmed or not, are left alone)."""
+        if not rows:
+            return 0
+        new = 0
+        with self._engine.begin() as c:
+            for r in {(x["platform"], x["channel_item_code"]): x for x in rows}.values():
+                key = {"p": r["platform"], "c": r["channel_item_code"]}
+                if c.execute(text("SELECT 1 FROM product_channel_map WHERE platform=:p AND channel_item_code=:c"), key).first():
+                    continue
+                c.execute(text("INSERT INTO product_channel_map (platform, channel_item_code, std_item_id, pack_size_factor, "
+                               "match_method, match_confidence, match_grade) VALUES (:p, :c, :i, 1, 'RULE', :conf, 'SAME')"),
+                          {**key, "i": r["std_item_id"], "conf": str(r["match_confidence"])})
+                new += 1
+        return new
+
     def insert_retail(self, rows: list[dict[str, Any]]) -> int:
         if not rows:
             return 0
+        rows = [_retail_row(r) for r in rows]
         if self._engine.dialect.name == "sqlite":
             rows = [{k: _sqlite_value(v) for k, v in r.items()} for r in rows]
         with self._engine.begin() as c:   # snapshots are append-only time series: every run adds rows
             c.execute(_INSERT_RETAIL, rows)
         return len(rows)
+
+
+def _retail_row(r: dict[str, Any]) -> dict[str, Any]:
+    """Competitor-price terms are optional on input: no coupon/shipping/bonus means the shown price is the price paid."""
+    out = {"coupon_discount": 0, "shipping_fee": 0, "bonus_qty": 0, **r}
+    if out.get("effective_unit_price") is None:
+        out["effective_unit_price"] = out["normalized_unit_price"]
+    return out
 
 
 class InMemoryRepository:
@@ -135,7 +161,11 @@ class InMemoryRepository:
         return prices[-1] if prices else None
 
     def insert_retail(self, rows: list[dict[str, Any]]) -> int:
-        self.retail.extend(dict(r) for r in rows)
+        self.retail.extend(_retail_row(dict(r)) for r in rows)
+        return len(rows)
+
+    def propose_matches(self, rows: list[dict[str, Any]], now: datetime) -> int:
+        self.proposed = getattr(self, "proposed", []) + [dict(r) for r in rows]
         return len(rows)
 
     def upsert_benchmarks(self, rows: list[dict[str, Any]]) -> int:

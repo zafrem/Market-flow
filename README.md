@@ -71,6 +71,18 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"      # put the outp
 - **BUYER responses omit cost and margin keys entirely** (enforced server-side, covered by tests); out-of-scope resources return 404.
 - The dashboard keeps its token in memory only (a reload signs you out). Serve it behind HTTPS if exposed beyond localhost.
 
+## Price & margin (revised specification, P0)
+- **Only confirmed matches count.** A scraped competitor listing is stored as an *unconfirmed* candidate. It drives recommendations, the matrix and alerts only after an MD/ADMIN grades it **SAME** (dashboard > Product matches, `cli matches --unconfirmed`, `cli match PLATFORM CODE ITEM_ID --as kim:MD [--grade SAME|SIMILAR|SUBSTITUTE]`, or `PUT /matches/{platform}/{code}`). SIMILAR/SUBSTITUTE are recorded but never used. Turn the rule off with `require_confirmed_match = false` in `[decision]`.
+- **Effective purchase price.** Competitor comparison uses the price after public coupon, shipping fee and bonus units (1+1 = 50% per unit). Optional selector fields `coupon`, `shipping_fee`, `bonus` in `config/extraction.json` feed it; without them the shown price is the price.
+- **Net margin includes disposal cost**: the ERP column `disposal_cost` (폐기비) per unit, else `[decision] disposal_rate_pct` of the purchase cost.
+- **If we match**: the matrix and every recommendation show the expected margin at the competitor's effective price and the weekly break-even volume (`weekly units x margin now / margin then`; "no margin at that price" when the cut leaves nothing).
+- **Export**: dashboard > Comparison matrix > Export comparison (CSV), or `GET /matrix/export` (MD/ADMIN, audited as `MATRIX_EXPORTED`).
+- **Alerts carry no cost, margin or price figures**, only the SKU, the situation and a link (`[server] public_url`). One alert per SKU and type per 24 h.
+- Upgrading an existing MySQL: run `db/migrations/002_price_margin_p0.sql` once (SQLite adds the columns by itself).
+
+## Vision (ChatGPT / OpenAI API)
+Image reading (competitor flyers, banners) is configured to use the OpenAI API. Put the key in `config/settings.toml` under `[vision] openai_api_key` (file mode 600, git-ignored) or in the environment as `OPENAI_API_KEY` (and optionally `OPENAI_MODEL`, default `gpt-4o-mini`; use any vision-capable model on your account). In Docker, set `OPENAI_API_KEY` in `.env`. `python -m marketflow.worker --check` prints `vision_enabled=True/False` and never prints the key. The key setting is in place; the flyer-reading step that calls the API is not built yet, so nothing is sent to OpenAI today.
+
 ## Market intelligence (Category Health + Trend Radar)
 Two extra dashboard tabs built from demand and interest signals you import as CSV/XLSX (see `docs/MI_FRAMEWORK.md`):
 ```bash

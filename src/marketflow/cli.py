@@ -48,6 +48,10 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
     sub.add_parser("crawlers")
     p = sub.add_parser("crawler-run"); p.add_argument("crawler_id")
     sub.add_parser("audit")
+    p = sub.add_parser("matches"); p.add_argument("--unconfirmed", action="store_true")
+    p = sub.add_parser("match"); p.add_argument("platform"); p.add_argument("code"); p.add_argument("std_item_id", type=int)
+    p.add_argument("--grade", choices=["SAME", "SIMILAR", "SUBSTITUTE"], default="SAME"); p.add_argument("--as", dest="actor", required=True, metavar="NAME:ROLE")
+    p = sub.add_parser("unmatch"); p.add_argument("platform"); p.add_argument("code"); p.add_argument("--as", dest="actor", required=True, metavar="NAME:ROLE")
     sub.add_parser("review")
     sub.add_parser("selectors")
     sub.add_parser("alert-test")
@@ -66,6 +70,25 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
     if a.cmd == "review":
         for r in repo.list_review("OPEN"):
             print(f"#{r['review_id']} {r['kind']:<24} {r['source']:<8} {r['item_key']}  -- {r['reason']}", file=out)
+        return 0
+    if a.cmd == "matches":
+        for m in repo.list_matches(None, a.unconfirmed):
+            state = "confirmed" if m["reviewed_at"] and m["match_grade"] == "SAME" else ("graded" if m["reviewed_at"] else "UNCONFIRMED")
+            print(f"{m['platform']}/{m['channel_item_code']:<14} -> #{m['std_item_id']} {m['item_name']:<12} {m['match_grade']:<10} {state:<11} "
+                  f"{m['product_title'] or ''}", file=out)
+        return 0
+    if a.cmd in {"match", "unmatch"}:
+        from . import matching
+        name, _, role = a.actor.partition(":")
+        try:
+            if a.cmd == "match":
+                matching.set_match(repo, tp, service.Actor(name, role.upper()), a.platform, a.code, a.std_item_id, a.grade)
+            else:
+                matching.remove_match(repo, tp, service.Actor(name, role.upper()), a.platform, a.code)
+        except (PermissionError, service.WorkflowError) as e:
+            print(f"refused: {e}", file=out)
+            return 2
+        print(f"{a.cmd} {a.platform}/{a.code} ok", file=out)
         return 0
     if a.cmd == "selectors":
         for c in repo.list_candidates(None):

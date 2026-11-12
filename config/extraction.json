@@ -182,6 +182,12 @@
         "promo",
         "프로모션비"
       ],
+      "disposal_cost": [
+        "disposal_cost",
+        "disposal",
+        "폐기비",
+        "폐기비용"
+      ],
       "vat_inclusive": [
         "vat_inclusive",
         "vat",

@@ -93,7 +93,7 @@ function renderWho() {
   const out = el("button", t("signout")); out.onclick = signOut;
   $("#who").replaceChildren(document.createTextNode(me.name + " · " + me.role + "  "), out);
 }
-const reloadAll = () => Promise.all([loadMatrix(), loadMi(), loadRecs(), ...(me.role === "BUYER" ? [] : [loadReview(), loadSelectors(), loadCrawlers()])]);
+const reloadAll = () => Promise.all([loadMatrix(), loadMi(), loadRecs(), ...(me.role === "BUYER" ? [] : [loadMatches(), loadReview(), loadSelectors(), loadCrawlers()])]);
 function setLang(l) {
   lang = l;
   try { localStorage.setItem("mf-lang", l); } catch (e) { /* storage blocked: the choice lasts until reload */ }
@@ -121,7 +121,7 @@ $("#login-form").addEventListener("submit", async (ev) => {
 
 document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => {
   document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("active", x === b));
-  for (const id of ["matrix", "health", "radar", "crawlers", "recs", "review", "selectors"]) $("#" + id).hidden = b.dataset.tab !== id;
+  for (const id of ["matrix", "health", "radar", "crawlers", "recs", "matches", "review", "selectors"]) $("#" + id).hidden = b.dataset.tab !== id;
   if (b.dataset.tab === "crawlers" && crawlerId) history.replaceState(null, "", "#/crawlers/" + crawlerId);
 }));
 $("#only-watch").addEventListener("change", loadMatrix);
@@ -133,7 +133,7 @@ async function loadMatrix() {
   const body = $("#matrix-table tbody"); body.replaceChildren();
   if (!rows.length) {
     const td = el("td", $("#only-watch").checked ? t("empty.watch") : t("empty.items"), "empty");
-    td.colSpan = 8; const tr = el("tr"); tr.append(td); body.append(tr); return;
+    td.colSpan = 9; const tr = el("tr"); tr.append(td); body.append(tr); return;
   }
   const decimals = (v) => v.toLocaleString(numLocale(), { maximumFractionDigits: 2 });
   for (const r of rows) {
@@ -146,7 +146,8 @@ async function loadMatrix() {
     }
     const bench = trendCell(r.public_benchmark ? won(r.public_benchmark.normalized_price) : "–", tr_.wholesale, "c-wholesale", t("th.wholesale"), decimals);
     const ours = trendCell(won(r.internal.current_selling_price), tr_.ours, "c-ours", t("th.ours"), won);
-    const oos = r.competitors.out_of_stock ? t("oos", { n: r.competitors.out_of_stock, total: r.competitors.listings }) : "";
+    const unconf = r.competitors.unconfirmed ? t("unconfirmed", { n: r.competitors.unconfirmed }) : "";
+    const oos = [r.competitors.out_of_stock ? t("oos", { n: r.competitors.out_of_stock, total: r.competitors.listings }) : "", unconf].filter(Boolean).join(" · ");
     const comp = trendCell(r.competitors.lowest_pack_price ? won(r.competitors.lowest_pack_price) : "–", tr_.competitor, "c-comp", t("th.lowest"), decimals, oos);
     const star = el("button", watch.has(r.std_item_id) ? "★" : "☆", "star" + (watch.has(r.std_item_id) ? " on" : ""));
     star.setAttribute("aria-label", t(watch.has(r.std_item_id) ? "watch.remove" : "watch.add", { name: r.item_name }));
@@ -158,7 +159,50 @@ async function loadMatrix() {
       loadMatrix();
     };
     const starCell = el("td"); starCell.append(star);
-    tr.append(name, el("td", r.channel_name), bench, ours, margin, comp, el("td", won(r.stock_qty) + (r.remaining_days != null ? " (D-" + r.remaining_days + ")" : ""), "num"), starCell);
+    tr.append(name, el("td", r.channel_name), bench, ours, margin, comp, matchedCell(r), el("td", won(r.stock_qty) + (r.remaining_days != null ? " (D-" + r.remaining_days + ")" : ""), "num"), starCell);
+    body.append(tr);
+  }
+}
+
+// What matching the lowest confirmed competitor would do: expected margin and the weekly volume that earns today's total margin.
+function matchedCell(r) {
+  const td = el("td", "", "num cost matched"); td.hidden = me.role === "BUYER";
+  const s = r.internal.match_simulation;
+  if (!s) { td.textContent = "–"; return td; }
+  td.append(el("span", s.expected_margin_rate + "%", "val"));
+  const note = s.bep_status === "OK" ? t("bep.ok", { n: Number(s.bep_units).toLocaleString(numLocale()) })
+    : s.bep_status === "NOT_A_CUT" ? t("bep.no_cut") : s.bep_status === "UNACHIEVABLE" ? t("bep.unachievable") : t("bep.none");
+  td.append(el("small", note + (s.below_floor ? " · " + t("below_floor") : "")));
+  return td;
+}
+
+// Download a server-built file (the request carries the bearer token, so a plain link cannot be used).
+async function downloadFile(path, filename) {
+  const r = await fetch(path, { headers: token ? { Authorization: "Bearer " + token } : {} });
+  if (!r.ok) { const body = await r.json().catch(() => ({})); throw new Error(body.detail || r.statusText); }
+  const url = URL.createObjectURL(new Blob(["\ufeff" + await r.text()], { type: "text/csv" }));
+  const a = el("a"); a.href = url; a.download = filename; document.body.append(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+}
+$("#export-matrix").addEventListener("click", () => downloadFile("/matrix/export" + ($("#only-watch").checked ? "?watchlist=true" : ""), "marketflow-comparison.csv").catch((e) => toast(e.message)));
+
+async function loadMatches() {
+  const { matches } = await api("/matches");
+  setBadge("matches", matches.filter((m) => !m.confirmed && m.match_grade === "SAME" && !m.reviewed_at).length);
+  const body = $("#matches-table tbody"); body.replaceChildren();
+  if (!matches.length) emptyRow(body, 7, t("empty.matches"));
+  for (const m of matches) {
+    const grade = el("select"); grade.setAttribute("aria-label", t("th.grade"));
+    for (const g of ["SAME", "SIMILAR", "SUBSTITUTE"]) { const o = el("option", t("grade." + g)); o.value = g; o.selected = g === m.match_grade; grade.append(o); }
+    const act = el("td");
+    const save = el("button", t(m.reviewed_at ? "act.regrade" : "act.confirm"));
+    save.onclick = async () => { try { await api("/matches/" + encodeURIComponent(m.platform) + "/" + encodeURIComponent(m.channel_item_code), { method: "PUT", body: JSON.stringify({ std_item_id: m.std_item_id, grade: grade.value }) }); toast(""); await Promise.all([loadMatches(), loadMatrix()]); } catch (e) { toast(e.message); } };
+    const del = el("button", t("act.remove"));
+    del.onclick = async () => { try { await api("/matches/" + encodeURIComponent(m.platform) + "/" + encodeURIComponent(m.channel_item_code), { method: "DELETE" }); toast(""); await Promise.all([loadMatches(), loadMatrix()]); } catch (e) { toast(e.message); } };
+    act.append(save, del);
+    const gradeCell = el("td"); gradeCell.append(grade);
+    const state = m.confirmed ? t("match.confirmed") : m.reviewed_at ? t("match.graded") : t("match.unconfirmed");
+    const tr = el("tr");
+    tr.append(el("td", m.platform), el("td", m.channel_item_code), el("td", m.product_title || ""), el("td", m.item_name), gradeCell, el("td", state, "status " + (m.confirmed ? "green" : m.reviewed_at ? "" : "amber")), act);
     body.append(tr);
   }
 }

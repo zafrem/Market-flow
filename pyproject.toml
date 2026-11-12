@@ -38,5 +38,6 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 markers = [
   "mysql: needs a live MySQL (set MARKETFLOW_TEST_DB_URL)",
+  "unconfirmed: keep scraped listings unconfirmed (do not auto-confirm matches in this test)",
   "live: calls the real APIs with your tokens (set MARKETFLOW_LIVE=1)",
 ]

@@ -31,16 +31,24 @@ SQLITE_DDL = [
         std_item_id INTEGER NOT NULL, match_confidence NUMERIC NOT NULL, channel_item_code TEXT NOT NULL,
         product_title TEXT NOT NULL, original_price INTEGER NOT NULL, sale_price INTEGER NOT NULL,
         normalized_unit_price NUMERIC NOT NULL, is_out_of_stock INTEGER DEFAULT 0, badge_info TEXT,
-        extraction_source TEXT DEFAULT 'SELECTOR', region_code TEXT NOT NULL)""",
+        extraction_source TEXT DEFAULT 'SELECTOR', region_code TEXT NOT NULL,
+        coupon_discount INTEGER NOT NULL DEFAULT 0, shipping_fee INTEGER NOT NULL DEFAULT 0,
+        bonus_qty NUMERIC NOT NULL DEFAULT 0, effective_unit_price NUMERIC)""",
     """CREATE TABLE IF NOT EXISTS int_operations_inventory (
         internal_id INTEGER PRIMARY KEY AUTOINCREMENT, recorded_date TEXT NOT NULL, std_item_id INTEGER NOT NULL,
         internal_sku TEXT NOT NULL, channel_name TEXT NOT NULL, purchase_cost NUMERIC NOT NULL,
         fixed_cost NUMERIC NOT NULL, logistics_cost NUMERIC NOT NULL, channel_fee_rate NUMERIC NOT NULL,
-        promo_cost NUMERIC NOT NULL DEFAULT 0, vat_inclusive INTEGER NOT NULL DEFAULT 1,
+        promo_cost NUMERIC NOT NULL DEFAULT 0, disposal_cost NUMERIC, vat_inclusive INTEGER NOT NULL DEFAULT 1,
         pack_std_units NUMERIC NOT NULL DEFAULT 1, current_selling_price INTEGER NOT NULL,
         stock_qty INTEGER NOT NULL, daily_sales_qty INTEGER NOT NULL, min_price_floor INTEGER NOT NULL,
         lifecycle_metric TEXT NOT NULL, UNIQUE (recorded_date, internal_sku, channel_name))""",
     "CREATE INDEX IF NOT EXISTS idx_inv_item_date ON int_operations_inventory (std_item_id, recorded_date)",
+    """CREATE TABLE IF NOT EXISTS product_channel_map (
+        platform TEXT NOT NULL, channel_item_code TEXT NOT NULL,
+        std_item_id INTEGER NOT NULL REFERENCES master_products (std_item_id),
+        pack_size_factor NUMERIC NOT NULL DEFAULT 1, match_method TEXT NOT NULL, match_confidence NUMERIC NOT NULL,
+        match_grade TEXT NOT NULL DEFAULT 'SAME', reviewed_by TEXT, reviewed_at TEXT,
+        PRIMARY KEY (platform, channel_item_code))""",
     """CREATE TABLE IF NOT EXISTS price_recommendations (
         rec_id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, std_item_id INTEGER NOT NULL,
         channel_name TEXT NOT NULL, current_price INTEGER NOT NULL, suggested_price INTEGER NOT NULL,
@@ -115,11 +123,25 @@ def make_engine(url: str) -> Engine:
     return create_engine(url, future=True, **kwargs)
 
 
+# Columns added after the first release: an existing development database gets them on start (MySQL: db/migrations).
+SQLITE_ADDED_COLUMNS = [
+    ("ext_retail_prices", "coupon_discount", "INTEGER NOT NULL DEFAULT 0"),
+    ("ext_retail_prices", "shipping_fee", "INTEGER NOT NULL DEFAULT 0"),
+    ("ext_retail_prices", "bonus_qty", "NUMERIC NOT NULL DEFAULT 0"),
+    ("ext_retail_prices", "effective_unit_price", "NUMERIC"),
+    ("int_operations_inventory", "disposal_cost", "NUMERIC"),
+]
+
+
 def init_sqlite(engine: Engine) -> None:
     """Create tables and seed the starter catalog. Idempotent."""
     with engine.begin() as c:
         for stmt in SQLITE_DDL:
             c.execute(text(stmt))
+        for table, column, decl in SQLITE_ADDED_COLUMNS:
+            have = {r[1] for r in c.execute(text(f"PRAGMA table_info({table})"))}
+            if column not in have:
+                c.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {decl}"))
         for l, m, name, unit in ITEMS:
             c.execute(text("INSERT OR IGNORE INTO master_products (category_l, category_m, item_name, standard_unit) "
                            "VALUES (:l,:m,:n,:u)"), {"l": l, "m": m, "n": name, "u": unit})

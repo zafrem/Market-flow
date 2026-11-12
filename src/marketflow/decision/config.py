@@ -23,6 +23,8 @@ class DecisionConfig:
     competitor_max_age_hours: Decimal = Decimal("24")
     min_match_confidence: Decimal = Decimal("0.8")
     alert_margin_pct: Decimal = Decimal("10")
+    disposal_rate_pct: Decimal = Decimal("0")           # category average write-off, % of purchase cost (SKU figure wins)
+    require_confirmed_match: bool = True                # only reviewed, grade-SAME matches feed prices and alerts (F-08-2.3)
 
 
 _TYPES = {f.name: f.type for f in fields(DecisionConfig)}
@@ -39,7 +41,12 @@ def load_decision_config(raw: Mapping[str, Any] | None, category_l: str | None =
     for k, v in merged.items():
         if k not in _TYPES:
             raise ValueError(f"unknown [decision] setting: {k!r}")
-        updates[k] = int(v) if k == "round_to" else Decimal(str(v))
+        if k == "require_confirmed_match":
+            if not isinstance(v, bool):
+                raise ValueError("invalid [decision]: require_confirmed_match must be true or false")
+            updates[k] = v
+        else:
+            updates[k] = int(v) if k == "round_to" else Decimal(str(v))
     cfg = replace(cfg, **updates)
     if cfg.max_step_pct <= 0 or cfg.round_to <= 0 or not (0 <= cfg.undercut_pct <= 5):
         raise ValueError("invalid [decision]: max_step_pct>0, round_to>0 and 0<=undercut_pct<=5 required")

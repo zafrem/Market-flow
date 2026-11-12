@@ -1,18 +1,20 @@
 """FastAPI service: auth, role-based masking, three-way matrix, watchlists, recommendation workflow."""
 from __future__ import annotations
 
+import csv
+import io
 from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy.engine import Engine
 
-from .. import curation
+from .. import curation, matching
 from ..db import init_sqlite, make_engine
 from ..decision import service
 from ..decision.service import Actor, WorkflowError
@@ -28,7 +30,7 @@ from .security import LoginThrottle, MIN_PASSWORD_LEN, MIN_SECRET_LEN, burn_veri
 
 STATIC = Path(__file__).parent / "static"
 COST_KEYS = {"purchase_cost", "fixed_cost", "logistics_cost", "channel_fee_rate", "promo_cost", "min_price_floor",
-             "margin_amount", "margin_rate", "margin_trend"}
+             "margin_amount", "margin_rate", "margin_trend", "disposal_cost", "match_simulation"}
 MI_MAX_UPLOAD = 5 * 1024 * 1024
 Role = Literal["ADMIN", "MD", "BUYER"]
 
@@ -36,6 +38,11 @@ Role = Literal["ADMIN", "MD", "BUYER"]
 class LoginIn(BaseModel):
     email: str = Field(max_length=255)
     password: str = Field(max_length=256)
+
+
+class MatchIn(BaseModel):
+    std_item_id: int
+    grade: Literal["SAME", "SIMILAR", "SUBSTITUTE"] = "SAME"
 
 
 class WatchlistIn(BaseModel):
@@ -88,7 +95,7 @@ def mask_recommendation(role: str, rec: dict[str, Any]) -> dict[str, Any]:
         return rec
     flags = {k: v for k, v in rec["flags"].items() if k != "LOW_MARGIN"}
     if "metrics" in flags:
-        flags["metrics"] = {k: v for k, v in flags["metrics"].items() if k not in {"margin_amount", "margin_rate", "floor"}}
+        flags["metrics"] = {k: v for k, v in flags["metrics"].items() if k not in {"margin_amount", "margin_rate", "floor", "match_simulation"}}
     return {**rec, "flags": flags}
 
 
@@ -166,6 +173,37 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
             r["internal"] = mask_internal(user.role, r["internal"])
         return {"rows": rows}
 
+    EXPORT_COLUMNS = [
+        ("item", "item_name"), ("category", "category_l"), ("sku", "internal_sku"), ("channel", "channel_name"),
+        ("data_date", "recorded_date"), ("our_price", None), ("competitor_lowest_effective_pack_price", None),
+        ("confirmed_listings", None), ("unconfirmed_listings", None), ("wholesale_unit_price", None),
+        ("net_margin_rate_pct", None), ("expected_margin_rate_pct_if_matched", None), ("bep_units_per_week", None),
+        ("bep_status", None), ("matched_price_below_floor", None)]
+
+    def csv_cell(v: Any) -> str:
+        s = "" if v is None else str(v)
+        return "'" + s if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s       # no spreadsheet formula injection
+
+    @app.get("/matrix/export")
+    def matrix_export(watchlist: bool = False, user: CurrentUser = Depends(current_user)):
+        """Price/margin comparison sheet as CSV (SRS F-08-4.1). Carries margins, so MD/ADMIN only; every export is audited."""
+        if user.role not in service.DECIDERS:
+            raise HTTPException(403, "MD or admin only")
+        rows = repo.matrix(user.scope, settings, now(), repo.watchlist(user.user_id) if watchlist else None)
+        out = io.StringIO()
+        w = csv.writer(out)
+        w.writerow([name for name, _ in EXPORT_COLUMNS])
+        for r in rows:
+            i, c, sim = r["internal"], r["competitors"], r["internal"].get("match_simulation") or {}
+            w.writerow([csv_cell(v) for v in (
+                r["item_name"], r["category_l"], r["internal_sku"], r["channel_name"], r["recorded_date"], i["current_selling_price"],
+                c["lowest_pack_price"], c["listings"], c["unconfirmed"],
+                (r["public_benchmark"] or {}).get("normalized_price"), i["margin_rate"], sim.get("expected_margin_rate"),
+                sim.get("bep_units"), sim.get("bep_status"), sim.get("below_floor"))])
+        repo.audit(user.email, "MATRIX_EXPORTED", None, {"rows": len(rows), "watchlist": watchlist}, now())
+        return Response(out.getvalue(), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="marketflow-comparison.csv"', "Cache-Control": "no-store"})
+
     @app.get("/watchlist")
     def get_watchlist(user: CurrentUser = Depends(current_user)):
         return {"std_item_ids": repo.watchlist(user.user_id)}
@@ -223,6 +261,39 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
         except WorkflowError as e:
             raise HTTPException(409, str(e)) from e
         return {"id": item_id, "ok": True}
+
+    # ---- product matches: which competitor listings count as "the same product" (MD / ADMIN) --------------------
+    @app.get("/matches")
+    def matches(unconfirmed: bool = False, user: CurrentUser = Depends(require_decider)):
+        return {"matches": [{**m, "match_confidence": str(m["match_confidence"]), "reviewed_at": str(m["reviewed_at"]) if m["reviewed_at"] else None,
+                             "confirmed": m["reviewed_at"] is not None and m["match_grade"] == "SAME"}
+                            for m in repo.list_matches(None, unconfirmed) if in_scope(user.scope, m["category_l"], m["category_m"])]}
+
+    @app.put("/matches/{platform}/{code}")
+    def put_match(platform: str, code: str, body: MatchIn, user: CurrentUser = Depends(require_decider)):
+        existing = repo.get_match(platform, code)
+        for item_id in {body.std_item_id, *([existing["std_item_id"]] if existing else [])}:
+            info = repo.item_scope_info(item_id)
+            if info is None or not in_scope(user.scope, info["category_l"], info["category_m"]):
+                raise HTTPException(404, "item not found")
+        try:
+            matching.set_match(repo, tp, Actor(user.email, user.role), platform, code, body.std_item_id, body.grade)
+        except PermissionError as e:
+            raise HTTPException(403, str(e)) from e
+        except WorkflowError as e:
+            raise HTTPException(409, str(e)) from e
+        return {"platform": platform, "code": code, "std_item_id": body.std_item_id, "grade": body.grade, "confirmed": body.grade == "SAME"}
+
+    @app.delete("/matches/{platform}/{code}")
+    def delete_match(platform: str, code: str, user: CurrentUser = Depends(require_decider)):
+        m = repo.get_match(platform, code)
+        if m is None or not in_scope(user.scope, m["category_l"], m["category_m"]):
+            raise HTTPException(404, "match not found")
+        try:
+            matching.remove_match(repo, tp, Actor(user.email, user.role), platform, code)
+        except WorkflowError as e:
+            raise HTTPException(409, str(e)) from e
+        return {"platform": platform, "code": code, "removed": True}
 
     @app.get("/review")
     def review_items(_: CurrentUser = Depends(require_decider)):

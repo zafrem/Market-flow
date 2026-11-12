@@ -66,6 +66,10 @@ CREATE TABLE IF NOT EXISTS ext_retail_prices (
   badge_info VARCHAR(100) NULL,
   extraction_source VARCHAR(10) DEFAULT 'SELECTOR',
   region_code VARCHAR(10) NOT NULL,
+  coupon_discount INT NOT NULL DEFAULT 0 COMMENT 'public coupon, KRW off the shown price',
+  shipping_fee INT NOT NULL DEFAULT 0 COMMENT 'delivery fee a buyer pays for this listing',
+  bonus_qty DECIMAL(6,2) NOT NULL DEFAULT 0 COMMENT 'free units per paid unit (1+1 = 1)',
+  effective_unit_price DECIMAL(10,2) NULL COMMENT 'unit price after coupon, shipping and bonus units',
   PRIMARY KEY (retail_id, scraped_at),
   KEY idx_item_time (std_item_id, scraped_at)
 ) PARTITION BY {retail};
@@ -81,6 +85,7 @@ CREATE TABLE IF NOT EXISTS int_operations_inventory (
   logistics_cost DECIMAL(10,2) NOT NULL,
   channel_fee_rate DECIMAL(5,2) NOT NULL COMMENT 'percent, 11.50 = 11.5%',
   promo_cost DECIMAL(10,2) NOT NULL DEFAULT 0,
+  disposal_cost DECIMAL(10,2) NULL COMMENT 'per-unit write-off cost; NULL = use the category disposal rate',
   vat_inclusive TINYINT(1) NOT NULL DEFAULT 1,
   pack_std_units DECIMAL(10,4) NOT NULL DEFAULT 1 COMMENT 'standard units per sale unit',
   current_selling_price INT NOT NULL,
@@ -100,7 +105,8 @@ CREATE TABLE IF NOT EXISTS product_channel_map (
   pack_size_factor DECIMAL(10,4) NOT NULL DEFAULT 1,
   match_method VARCHAR(10) NOT NULL,
   match_confidence DECIMAL(4,3) NOT NULL,
-  reviewed_by INT NULL,
+  match_grade VARCHAR(10) NOT NULL DEFAULT 'SAME' COMMENT 'SAME | SIMILAR | SUBSTITUTE',
+  reviewed_by VARCHAR(100) NULL,
   reviewed_at DATETIME NULL,
   PRIMARY KEY (platform, channel_item_code),
   FOREIGN KEY (std_item_id) REFERENCES master_products (std_item_id)

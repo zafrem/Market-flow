@@ -59,7 +59,7 @@ async def _httpx_post(url: str, payload: dict[str, Any]) -> int:
 
 class Notifier:
     def __init__(self, webhook_url: str, queues: QueueMixin, tp: TimeProvider, *, post: Post = _httpx_post,
-                 sleep: Callable[[float], Awaitable[None]] = asyncio.sleep, window_hours: float = 6,
+                 sleep: Callable[[float], Awaitable[None]] = asyncio.sleep, window_hours: float = 24,
                  max_per_run: int = 20, max_attempts: int = 5, base_delay: float = 1.0):
         self._url = validate_webhook(webhook_url) if webhook_url else ""
         self._q, self._tp, self._post, self._sleep = queues, tp, post, sleep
@@ -115,18 +115,22 @@ class Notifier:
         res.dead += 1
 
 
-def alerts_from_recommendations(recs: list[tuple[int, Recommendation]]) -> list[Alert]:
+def alerts_from_recommendations(recs: list[tuple[int, Recommendation]], link: str = "") -> list[Alert]:
+    """Alert text names the SKU and the situation but carries NO cost, margin or price figures (SRS F-08-4.5): anyone who
+    can read the channel can see it, and the numbers are one click away behind the dashboard login. `link` is the
+    dashboard address (settings server.public_url)."""
     out = []
+    tail = f" {link}" if link else ""
     for rec_id, r in recs:
         who, m = f"{r.internal_sku}/{r.channel_name}", r.flags.get("metrics", {})
         if "REVERSE_MARGIN_WARNING" in r.flags:
-            out.append(Alert(f"REVERSE_MARGIN:{who}", "RED", f"Reverse margin risk {who}: competitor price is below the "
-                             f"floor (₩{m.get('floor')}); price held at ₩{r.suggested_price}. Rec #{rec_id}."))
+            out.append(Alert(f"REVERSE_MARGIN:{who}", "RED", f"Reverse margin risk {who}: a competitor is priced below the "
+                             f"price floor; price held. Rec #{rec_id}.{tail}"))
         if "SPOILAGE_RISK_FLAG" in r.flags:
             out.append(Alert(f"SPOILAGE:{who}", "AMBER", f"Spoilage risk {who}: shelf life {m.get('remaining_days')}d vs "
-                             f"run-rate {m.get('run_rate_days')}d. Suggested ₩{r.current_price} → ₩{r.suggested_price}. Rec #{rec_id}."))
+                             f"run-rate {m.get('run_rate_days')}d. Rec #{rec_id}.{tail}"))
         if r.flags.get("LOW_MARGIN"):
-            out.append(Alert(f"LOW_MARGIN:{who}", "AMBER", f"Low margin {who}: {m.get('margin_rate')}% at ₩{r.current_price}. Rec #{rec_id}."))
+            out.append(Alert(f"LOW_MARGIN:{who}", "AMBER", f"Low margin {who}: at or below the alert threshold. Rec #{rec_id}.{tail}"))
     return out
 
 

@@ -74,7 +74,12 @@ async def scrape_platform(platform: str, transport: Transport, tp: TimeProvider,
             except UnitError:
                 res.unparseable.append(it["product_title"])
                 continue
+            coupon, ship = int(it.get("coupon_discount") or 0), int(it.get("shipping_fee") or 0)
+            bonus = Decimal(str(it.get("bonus_qty") or 0))
+            paid = max(it["sale_price"] - coupon, 0) + ship                  # what the buyer pays per purchase
+            effective = (norm * Decimal(paid) / Decimal(it["sale_price"]) / (1 + bonus)).quantize(Decimal("0.01"))
             rows.append({
+                "coupon_discount": coupon, "shipping_fee": ship, "bonus_qty": bonus, "effective_unit_price": effective,
                 "scraped_at": now, "platform": platform, "std_item_id": std_id,
                 "match_confidence": ALIAS_MATCH_CONFIDENCE, "channel_item_code": it["channel_item_code"],
                 "product_title": it["product_title"][:255], "original_price": it["original_price"],
@@ -83,6 +88,10 @@ async def scrape_platform(platform: str, transport: Transport, tp: TimeProvider,
                 "extraction_source": healed.source, "region_code": rule["region_code"],
             })
         res.stored += repo.insert_retail(rows)
+        propose = getattr(repo, "propose_matches", None)
+        if propose:                                    # unconfirmed candidates for a person to review (F-08-2.3)
+            propose([{"platform": r["platform"], "channel_item_code": r["channel_item_code"], "std_item_id": r["std_item_id"],
+                      "match_confidence": r["match_confidence"]} for r in rows], now)
     if review:
         review([*(ReviewItem("UNMATCHED_TITLE", platform, t, "no catalog item matches this title") for t in res.unmatched),
                 *(ReviewItem("UNPARSEABLE_TITLE", platform, t, "quantity/unit could not be determined") for t in res.unparseable),

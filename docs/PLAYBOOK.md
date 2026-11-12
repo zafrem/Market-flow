@@ -55,6 +55,9 @@ Rules to explain to users: buyers never see cost or margin; MDs can approve and 
 
 ## 4. Routine tasks
 
+### 4.0 Confirm competitor matches (MD, daily while onboarding SKUs)
+Scraped listings arrive as *needs review*. Dashboard > Product matches (tab badge = how many wait): pick the grade (Same product / Similar / Substitute) and press confirm. Only "Same product" feeds recommendations, the matrix and alerts; the matrix shows "N not confirmed" under the competitor price when listings are waiting. A listing that was discontinued or whose URL changed stops appearing in new scrapes: remove its match. CLI equivalents: `cli matches --unconfirmed`, `cli match`, `cli unmatch`. All changes are audited (`MATCH_SET`, `MATCH_REMOVED`).
+
 ### 4.1 Change a crawler schedule or settings
 Crawlers > pick the crawler > edit enabled / times (KST `HH:MM`) / settings > Save. No restart needed. Changes are audited (`CRAWLER_UPDATED`).
 
@@ -71,13 +74,14 @@ Crawlers > `news` > settings: add the RSS/Atom URLs (http/https, public hosts on
 Edit `[decision]` (per category: `[decision.Fresh]`) or `[mi]` / `[mi.weights]` in `config/settings.toml`, then restart the API and worker. Start with `undercut_pct`, `max_step_pct`, `cooldown_hours`; change one at a time and compare the next day's recommendations.
 
 ### 4.6 Configure alerts
+Alert text names the SKU and the situation but never prices, margins or costs (SRS F-08-4.5); set `[server] public_url` so alerts link to the dashboard. The channel no longer needs to be restricted for margin reasons, but keep it internal.
 Set `[alerts] webhook_url` to a Slack-compatible webhook for a restricted channel (alerts include margins). Test: `cli alert-test`. Each alert key is sent at most once per 6 h, retried with backoff, then dead-lettered in `alert_log`; at most 20 per run.
 
 ## 5. Deploy and upgrade
 
 1. Take a backup first (§7).
 2. `git pull`; run `.venv/bin/pytest` (and `cd tests/js && npm test` if the dashboard changed).
-3. Docker: `docker compose up --build -d`. New tables are created from `db/init/*.sql` only on an **empty** data directory; for an existing MySQL, apply the new `CREATE TABLE IF NOT EXISTS` statements from `db/init/001_schema.sql` manually. SQLite creates missing tables on start.
+3. Docker: `docker compose up --build -d`. Schema files in `db/init/*.sql` run only on an **empty** data directory. For an existing MySQL apply the files in `db/migrations/` in order (`002_price_margin_p0.sql` adds the effective-price, disposal and match-grade columns); new tables can be created from the `CREATE TABLE IF NOT EXISTS` statements in `db/init/001_schema.sql`. SQLite adds missing tables and columns on start.
 4. Check `docker compose logs collector-worker backend-api` for errors, then the Crawlers tab for the next slot.
 5. Rollback: previous image/commit, restore the backup if the schema changed.
 
@@ -112,6 +116,7 @@ If you change the schema, edit `scripts/gen_schema.py` and regenerate `db/init/0
 
 ## 8. Security routine
 
+- The OpenAI key (`[vision] openai_api_key` / `OPENAI_API_KEY`) is a paid credential: keep it only in `settings.toml` (mode 600) or `.env`, rotate it in the OpenAI console after any suspected leak, and set a spend limit there.
 - Rotate `jwt_secret` after any suspected leak (all users must log in again); rotate KAMIS/Garak/Gemini keys and the webhook URL in `settings.toml`, never in the repo (`config/settings.toml` is git-ignored).
 - Quarterly: review active users and category assignments; review `cli audit` (or `GET /admin/audit`) for unexpected approvals or crawler changes.
 - Keep the alert channel restricted to MD/ADMIN.

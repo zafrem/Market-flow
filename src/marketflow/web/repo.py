@@ -8,7 +8,7 @@ from typing import Any
 
 from sqlalchemy import text
 
-from ..decision.calc import net_margin, q2
+from ..decision.calc import disposal_cost, net_margin, q2, round_price, simulate_price_match
 from ..decision.config import load_decision_config
 from ..ops_repo import Repo, _dec, _dt, newest_per_listing
 
@@ -124,14 +124,29 @@ class AppRepository(Repo):
         for r in rows:
             cfg = load_decision_config(settings.decision, r["category_l"])
             cost = {k: _dec(r[k]) for k in ("purchase_cost", "fixed_cost", "logistics_cost", "channel_fee_rate", "promo_cost")}
+            disposal = disposal_cost(cost["purchase_cost"], None if r.get("disposal_cost") is None else _dec(r["disposal_cost"]),
+                                     cfg.disposal_rate_pct)
             amt, rate = net_margin(r["current_selling_price"], cost["purchase_cost"], cost["fixed_cost"], cost["logistics_cost"],
-                                   cost["promo_cost"], cost["channel_fee_rate"], bool(r["vat_inclusive"]), cfg.vat_rate)
+                                   cost["promo_cost"], cost["channel_fee_rate"], bool(r["vat_inclusive"]), cfg.vat_rate, disposal=disposal)
             bench = history["latest_bench"].get(int(r["std_item_id"]))
             since = now - timedelta(hours=float(cfg.competitor_max_age_hours))
             comps = newest_per_listing([c for c in history["listings"].get(int(r["std_item_id"]), []) if c["scraped_at"] >= since])
             comps = [c for c in comps if c["match_confidence"] >= cfg.min_match_confidence]
+            seen = len(comps)
+            if cfg.require_confirmed_match:                     # only reviewed SAME matches count (F-08-2.3)
+                comps = [c for c in comps if (c["platform"], c["channel_item_code"], int(r["std_item_id"])) in history["confirmed"]]
             live = [c["normalized_unit_price"] for c in comps if not c["is_out_of_stock"]]
             pack = _dec(r["pack_std_units"])
+            simulation = None
+            if live:                                            # matching the lowest competitor effective price: margin and BEP
+                target = max(1, round_price(min(live) * pack, cfg.round_to))
+                simulation = simulate_price_match(
+                    int(r["current_selling_price"]),
+                    target, Decimal(r["daily_sales_qty"]) * 7,
+                    {"purchase": cost["purchase_cost"], "packaging": cost["fixed_cost"], "logistics": cost["logistics_cost"],
+                     "promo": cost["promo_cost"], "fee_pct": cost["channel_fee_rate"], "disposal": disposal},
+                    bool(r["vat_inclusive"]), cfg.vat_rate)
+                simulation["below_floor"] = target < int(r["min_price_floor"])
             life = json.loads(r["lifecycle_metric"]) if isinstance(r["lifecycle_metric"], str) else r["lifecycle_metric"]
             out.append({
                 "std_item_id": r["std_item_id"], "item_name": r["item_name"], "category_l": r["category_l"],
@@ -142,10 +157,12 @@ class AppRepository(Repo):
                 "internal": {"current_selling_price": r["current_selling_price"], "purchase_cost": str(cost["purchase_cost"]),
                              "fixed_cost": str(cost["fixed_cost"]), "logistics_cost": str(cost["logistics_cost"]),
                              "channel_fee_rate": str(cost["channel_fee_rate"]), "promo_cost": str(cost["promo_cost"]),
+                             "disposal_cost": str(q2(disposal)), "match_simulation": simulation,
                              "min_price_floor": r["min_price_floor"], "margin_amount": str(amt), "margin_rate": str(rate),
                              "margin_trend": self._margin_trend(r, cfg, history)},
                 "trend": self._trend(r, cfg, pack, history),
-                "competitors": {"listings": len(comps), "out_of_stock": sum(c["is_out_of_stock"] for c in comps),
+                "competitors": {"listings": len(comps), "unconfirmed": seen - len(comps) if cfg.require_confirmed_match else 0,
+                                "out_of_stock": sum(c["is_out_of_stock"] for c in comps),
                                 "lowest_unit_price": str(q2(min(live))) if live else None,
                                 "lowest_pack_price": str(q2(min(live) * pack)) if live else None},
             })
@@ -158,7 +175,7 @@ class AppRepository(Repo):
     def _history(self, rows: list[dict[str, Any]], now: datetime, settings=None) -> dict[str, Any]:
         """Everything the trend charts need for these matrix rows, fetched once (ids are ints, so inlining them is safe)."""
         if not rows:
-            return {"bench": {}, "inv": {}, "retail": {}, "latest_bench": {}, "listings": {}}
+            return {"bench": {}, "inv": {}, "retail": {}, "latest_bench": {}, "listings": {}, "confirmed": set()}
         ids = ",".join(str(i) for i in sorted({int(r["std_item_id"]) for r in rows}))
         first = min(self._last_day(r) for r in rows) - timedelta(days=TREND_DAYS - 1)
         last = max(self._last_day(r) for r in rows)
@@ -168,12 +185,13 @@ class AppRepository(Repo):
             bench.setdefault(int(x["std_item_id"]), []).append((_as_date(x["recorded_date"]), _dec(x["v"])))
         inv: dict[tuple[str, str], list[dict[str, Any]]] = {}
         for x in self._rows(f"SELECT recorded_date, internal_sku, channel_name, current_selling_price, purchase_cost, fixed_cost, logistics_cost, "
-                            f"channel_fee_rate, promo_cost, vat_inclusive FROM int_operations_inventory WHERE std_item_id IN ({ids}) "
+                            f"channel_fee_rate, promo_cost, disposal_cost, vat_inclusive FROM int_operations_inventory WHERE std_item_id IN ({ids}) "
                             "AND recorded_date >= :s AND recorded_date <= :e ORDER BY recorded_date", s=first, e=last):
             x["recorded_date"] = _as_date(x["recorded_date"])
             inv.setdefault((x["internal_sku"], x["channel_name"]), []).append(x)
         retail: dict[int, list[dict[str, Any]]] = {}
-        for x in self._rows(f"SELECT std_item_id, scraped_at, normalized_unit_price, match_confidence FROM ext_retail_prices WHERE std_item_id IN ({ids}) "
+        for x in self._rows(f"SELECT std_item_id, platform, channel_item_code, scraped_at, COALESCE(effective_unit_price, normalized_unit_price) "
+                            f"AS normalized_unit_price, match_confidence FROM ext_retail_prices WHERE std_item_id IN ({ids}) "
                             "AND is_out_of_stock = 0 AND scraped_at >= :s AND scraped_at < :e",
                             s=datetime.combine(first, time.min), e=datetime.combine(last + timedelta(days=1), time.min)):
             retail.setdefault(int(x["std_item_id"]), []).append(x)
@@ -184,11 +202,13 @@ class AppRepository(Repo):
         oldest = now - timedelta(hours=max(float(load_decision_config(settings.decision, c).competitor_max_age_hours)
                                            for c in {r["category_l"] for r in rows}))
         listings: dict[int, list[dict[str, Any]]] = {}
-        for x in self._rows(f"SELECT std_item_id, platform, channel_item_code, normalized_unit_price, is_out_of_stock, match_confidence, "
+        for x in self._rows(f"SELECT std_item_id, platform, channel_item_code, COALESCE(effective_unit_price, normalized_unit_price) "
+                            f"AS normalized_unit_price, is_out_of_stock, match_confidence, "
                             f"scraped_at FROM ext_retail_prices WHERE std_item_id IN ({ids}) AND scraped_at >= :since", since=oldest):
             x["scraped_at"] = _dt(x["scraped_at"])
             listings.setdefault(int(x["std_item_id"]), []).append(x)
-        return {"bench": bench, "inv": inv, "retail": retail, "latest_bench": latest_bench, "listings": listings}
+        return {"bench": bench, "inv": inv, "retail": retail, "latest_bench": latest_bench, "listings": listings,
+                "confirmed": self.confirmed_listings([int(i) for i in ids.split(",")])}
 
     def _trend(self, r: dict[str, Any], cfg, pack: Decimal, h: dict[str, Any]) -> dict[str, list[list[str]]]:
         """Daily series for the last TREND_DAYS days ending at the item's latest inventory date; days without data are
@@ -204,6 +224,8 @@ class AppRepository(Repo):
             at = _dt(c["scraped_at"])
             if not (since <= at.date() <= last) or _dec(c["match_confidence"]) < cfg.min_match_confidence:
                 continue
+            if cfg.require_confirmed_match and (c["platform"], c["channel_item_code"], int(r["std_item_id"])) not in h["confirmed"]:
+                continue
             day, price = str(at.date()), _dec(c["normalized_unit_price"]) * pack
             per_day[day] = min(price, per_day.get(day, price))
         return {"wholesale": wholesale, "ours": ours, "competitor": [[d, str(q2(v))] for d, v in sorted(per_day.items())]}
@@ -217,7 +239,9 @@ class AppRepository(Repo):
             if not since <= x["recorded_date"] <= last:
                 continue
             _, rate = net_margin(x["current_selling_price"], _dec(x["purchase_cost"]), _dec(x["fixed_cost"]), _dec(x["logistics_cost"]),
-                                 _dec(x["promo_cost"]), _dec(x["channel_fee_rate"]), bool(x["vat_inclusive"]), cfg.vat_rate)
+                                 _dec(x["promo_cost"]), _dec(x["channel_fee_rate"]), bool(x["vat_inclusive"]), cfg.vat_rate,
+                                 disposal=disposal_cost(_dec(x["purchase_cost"]), None if x.get("disposal_cost") is None else _dec(x["disposal_cost"]),
+                                                        cfg.disposal_rate_pct))
             out.append([str(x["recorded_date"]), str(rate)])
         return out
 

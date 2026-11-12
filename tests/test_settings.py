@@ -72,3 +72,12 @@ def test_example_file_is_valid_and_has_no_secrets():
     from marketflow.settings import ROOT
     s = load_settings(ROOT / "config" / "settings.example.toml", env={})
     assert not s.kamis_enabled and not s.garak_enabled
+
+
+def test_vision_uses_an_openai_key_from_file_or_env_and_never_leaks(tmp_path):
+    assert not load_settings(tmp_path / "missing.toml", env={}).vision_enabled
+    p = write(tmp_path, '[vision]\nopenai_api_key = "sk-file-secret"\nopenai_model = "gpt-test"\n')
+    s = load_settings(p, env={})
+    assert s.vision_enabled and s.openai_model == "gpt-test"
+    assert load_settings(p, env={"OPENAI_API_KEY": " sk-env-secret ", "OPENAI_MODEL": "m2"}).openai_api_key == "sk-env-secret"
+    assert "sk-file-secret" not in repr(s) and "sk-env-secret" not in repr(load_settings(p, env={"OPENAI_API_KEY": "sk-env-secret"}))

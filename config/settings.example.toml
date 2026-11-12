@@ -19,6 +19,7 @@ token_ttl_minutes = 60 # env: TOKEN_TTL_MINUTES
 tls_cert = ""          # env: TLS_CERT  (PEM)
 tls_key  = ""          # env: TLS_KEY   (PEM)
 hsts = false           # env: HSTS
+public_url = ""        # env: PUBLIC_URL. Dashboard address added to alerts as a link (alerts carry no cost or margin figures)
 trust_proxy = ""       # env: TRUST_PROXY. Reverse proxy address(es), e.g. "127.0.0.1": makes login throttling use the real client IP
 
 [alerts]
@@ -29,6 +30,10 @@ webhook_url = ""       # env: ALERT_WEBHOOK_URL
 mock = true            # env: MOCK_LLM. Set false to use Gemini for self-healing extraction.
 gemini_api_key = ""    # env: GEMINI_API_KEY  (https://aistudio.google.com)
 gemini_model = "gemini-2.5-flash"   # env: GEMINI_MODEL
+
+[vision]              # image reading (competitor flyers, banners) through the OpenAI API (ChatGPT). Empty key = vision disabled.
+openai_api_key = ""    # env: OPENAI_API_KEY  (https://platform.openai.com/api-keys). Keep this file chmod 600; never commit the key.
+openai_model = "gpt-4o-mini"   # env: OPENAI_MODEL. Any vision-capable model your account can use.
 
 [sources.kamis]        # https://www.kamis.or.kr -> open API key + id
 api_key = ""           # env: KAMIS_API_KEY
@@ -50,6 +55,8 @@ api_key = ""           # env: GARAK_API_KEY
 # round_to = 10                    # price tick (KRW)
 # flash_discount_pct = 10          # spoilage-risk markdown
 # alert_margin_pct = 10            # LOW_MARGIN flag at or below this net margin
+# disposal_rate_pct = 0            # category average write-off, % of purchase cost; a per-SKU disposal_cost in the ERP file wins
+# require_confirmed_match = true   # only competitor listings a person graded SAME (Matches) drive prices and alerts
 
 [mi]                   # Market Intelligence (Category Health + Trend Radar); every key is optional
 # min_periods = 4              # observations a keyword needs before it gets a lifecycle stage

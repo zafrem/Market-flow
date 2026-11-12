@@ -40,7 +40,8 @@ def run_decisions(repo: OpsRepository, settings: Settings, tp: TimeProvider, on:
         if user_threshold is not None:                                 # F-05-3: per-user alert_margin_bep
             cfg = replace(cfg, alert_margin_pct=user_threshold)
         ctx = Context(
-            competitors=repo.competitor_snapshots(row["std_item_id"], now - timedelta(hours=float(cfg.competitor_max_age_hours)), region),
+            competitors=repo.competitor_snapshots(row["std_item_id"], now - timedelta(hours=float(cfg.competitor_max_age_hours)), region,
+                                                   confirmed_only=cfg.require_confirmed_match),
             recent_daily_sales=repo.sales_history(row["internal_sku"], row["channel_name"], day),
             wholesale_change_pct=repo.wholesale_change_pct(row["std_item_id"]),
             last_change_at=repo.last_change_at(row["std_item_id"], row["channel_name"]))

@@ -51,9 +51,9 @@ async def test_sent_once_logged_and_deduplicated_within_window(env):
     assert (r1.sent, r1.suppressed) == (1, 0) and hook.posts[0][1]["text"].startswith(":large_orange_circle: Low margin")
     r2 = await n.dispatch([A])
     assert (r2.sent, r2.suppressed) == (0, 1) and len(hook.posts) == 1
-    env.tp.set(T0 + timedelta(hours=5, minutes=59))
+    env.tp.set(T0 + timedelta(hours=23, minutes=59))                     # one alert per SKU and type per 24 h (SRS F-08-4.5)
     assert (await n.dispatch([A])).suppressed == 1
-    env.tp.set(T0 + timedelta(hours=6, minutes=1))                       # window passed -> may fire again
+    env.tp.set(T0 + timedelta(hours=24, minutes=1))                      # window passed -> may fire again
     assert (await n.dispatch([A])).sent == 1 and len(hook.posts) == 2
 
 
@@ -137,7 +137,10 @@ def test_alerts_from_recommendations():
                                        (8, rec({"SPOILAGE_RISK_FLAG": True}, suggested_price=9000))])
     assert [(a.key, a.severity) for a in out] == [("REVERSE_MARGIN:APPLE-1/SHOPA", "RED"), ("LOW_MARGIN:APPLE-1/SHOPA", "AMBER"),
                                                   ("SPOILAGE:APPLE-1/SHOPA", "AMBER")]
-    assert "₩8186" in out[0].text and "Rec #7" in out[0].text and "4.20%" in out[1].text and "10000 → ₩9000" in out[2].text
+    assert "Rec #7" in out[0].text and "Rec #8" in out[2].text
+    for a in out:                                  # no cost, margin or price figures in any alert body (SRS F-08-4.5)
+        assert "₩" not in a.text and "%" not in a.text and "8186" not in a.text and "9000" not in a.text and "10000" not in a.text
+    assert alerts_from_recommendations([(7, rec({"LOW_MARGIN": True}))], "https://mf.example.com")[0].text.endswith(" https://mf.example.com")
     assert alerts_from_recommendations([(1, rec({}))]) == []
 
 

@@ -25,12 +25,13 @@
     </section>
     <section id="app" hidden>
       <div id="summary" class="summary" data-i18n-label="summary" aria-label="Summary"></div>
-      <nav><button data-tab="matrix" class="active"><span data-i18n="tab.matrix">Comparison matrix</span></button><button data-tab="health"><span data-i18n="tab.health">Category health</span></button><button data-tab="radar"><span data-i18n="tab.radar">Trend radar</span></button><button data-tab="recs"><span data-i18n="tab.recs">Recommendations</span></button><button data-tab="crawlers" class="decider"><span data-i18n="tab.crawlers">Crawlers</span></button><button data-tab="review" class="decider"><span data-i18n="tab.review">Review queue</span></button><button data-tab="selectors" class="decider"><span data-i18n="tab.selectors">Selector candidates</span></button></nav>
+      <nav><button data-tab="matrix" class="active"><span data-i18n="tab.matrix">Comparison matrix</span></button><button data-tab="health"><span data-i18n="tab.health">Category health</span></button><button data-tab="radar"><span data-i18n="tab.radar">Trend radar</span></button><button data-tab="recs"><span data-i18n="tab.recs">Recommendations</span></button><button data-tab="crawlers" class="decider"><span data-i18n="tab.crawlers">Crawlers</span></button><button data-tab="matches" class="decider"><span data-i18n="tab.matches">Product matches</span></button><button data-tab="review" class="decider"><span data-i18n="tab.review">Review queue</span></button><button data-tab="selectors" class="decider"><span data-i18n="tab.selectors">Selector candidates</span></button></nav>
       <p id="toast" role="status"></p>
       <div id="matrix">
         <div class="toolbar">
           <label class="inline"><input type="checkbox" id="only-watch"> <span data-i18n="watch_only">Watchlist only</span></label>
           <p class="hint" data-i18n="matrix.hint">Charts show the last 14 days. Hover a chart for daily values.</p>
+          <p class="decider"><button id="export-matrix" type="button" data-i18n="export_matrix">Export comparison (CSV)</button></p>
         </div>
         <div class="scroll"><table id="matrix-table"><thead><tr>
           <th data-i18n="th.item">Item</th><th data-i18n="th.channel">Channel</th>
@@ -38,6 +39,7 @@
           <th class="r"><span class="legend-dot c-ours"></span><span data-i18n="th.ours">Our price</span></th>
           <th class="cost r" data-i18n="th.margin">Margin</th>
           <th class="r"><span class="legend-dot c-comp"></span><span data-i18n="th.lowest">Lowest competitor</span><br><small data-i18n="th.pack">pack price</small></th>
+          <th class="cost r"><span data-i18n="th.if_matched">If we match</span><br><small data-i18n="th.if_matched_sub">margin · break-even units/week</small></th>
           <th class="r" data-i18n="th.stock">Stock</th><th data-i18n="th.watch">Watch</th>
         </tr></thead><tbody></tbody></table></div>
       </div>
@@ -61,6 +63,10 @@
       <div id="recs" hidden>
         <p class="decider"><button id="export-applied" data-i18n="export">Export applied prices (CSV)</button></p>
         <div class="scroll"><table id="recs-table"><thead><tr><th>#</th><th data-i18n="th.item">Item</th><th data-i18n="th.channel">Channel</th><th class="r">Current</th><th class="r">Suggested</th><th>Reason</th><th>Flags</th><th>Status</th><th></th></tr></thead><tbody></tbody></table></div>
+      </div>
+      <div id="matches" hidden>
+        <p class="hint" data-i18n="matches.hint">Only listings you confirm as the same product drive prices and alerts. Similar and substitute products are recorded but never used.</p>
+        <div class="scroll"><table id="matches-table"><thead><tr><th data-i18n="th.platform">Platform</th><th data-i18n="th.code">Listing</th><th data-i18n="th.title">Title</th><th data-i18n="th.item">Item</th><th data-i18n="th.grade">Grade</th><th data-i18n="th.status">Status</th><th></th></tr></thead><tbody></tbody></table></div>
       </div>
       <div id="review" hidden>
         <div class="scroll"><table id="review-table"><thead><tr><th data-i18n="th.num">#</th><th data-i18n="th.kind">Kind</th><th data-i18n="th.source">Source</th><th data-i18n="th.item">Item</th><th data-i18n="th.reason">Reason</th><th></th></tr></thead><tbody></tbody></table></div>

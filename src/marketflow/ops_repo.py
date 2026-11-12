@@ -69,14 +69,14 @@ class OpsRepository:
             return 0
         with self._e.begin() as c:
             for r in rows:
-                p = self._b({**r, "lifecycle_metric": json.dumps(r["lifecycle_metric"])})
+                p = self._b({"disposal_cost": None, **r, "lifecycle_metric": json.dumps(r["lifecycle_metric"])})
                 c.execute(text("DELETE FROM int_operations_inventory WHERE recorded_date=:recorded_date AND "
                                "internal_sku=:internal_sku AND channel_name=:channel_name"), p)
                 c.execute(text("INSERT INTO int_operations_inventory (recorded_date, std_item_id, internal_sku, channel_name, "
-                               "purchase_cost, fixed_cost, logistics_cost, channel_fee_rate, promo_cost, vat_inclusive, "
+                               "purchase_cost, fixed_cost, logistics_cost, channel_fee_rate, promo_cost, disposal_cost, vat_inclusive, "
                                "pack_std_units, current_selling_price, stock_qty, daily_sales_qty, min_price_floor, "
                                "lifecycle_metric) VALUES (:recorded_date, :std_item_id, :internal_sku, :channel_name, "
-                               ":purchase_cost, :fixed_cost, :logistics_cost, :channel_fee_rate, :promo_cost, :vat_inclusive, "
+                               ":purchase_cost, :fixed_cost, :logistics_cost, :channel_fee_rate, :promo_cost, :disposal_cost, :vat_inclusive, "
                                ":pack_std_units, :current_selling_price, :stock_qty, :daily_sales_qty, :min_price_floor, "
                                ":lifecycle_metric)"), p)
         return len(rows)
@@ -87,6 +87,7 @@ class OpsRepository:
                             "WHERE i.recorded_date = :d ORDER BY i.internal_sku, i.channel_name", d=d):
             for k in ("purchase_cost", "fixed_cost", "logistics_cost", "channel_fee_rate", "promo_cost", "pack_std_units"):
                 r[k] = _dec(r[k])
+            r["disposal_cost"] = None if r.get("disposal_cost") is None else _dec(r["disposal_cost"])
             r["lifecycle_metric"] = json.loads(r["lifecycle_metric"]) if isinstance(r["lifecycle_metric"], str) else r["lifecycle_metric"]
             out.append(r)
         return out
@@ -112,15 +113,76 @@ class OpsRepository:
         return True
 
     # ---- market context -------------------------------------------------------------------
-    def competitor_snapshots(self, std_item_id: int, since: datetime, region: str | None = None) -> list[dict[str, Any]]:
-        """Newest snapshot per (platform, channel_item_code) at or after `since`."""
-        sql = ("SELECT platform, channel_item_code, normalized_unit_price, is_out_of_stock, match_confidence, "
+    def confirmed_listings(self, item_ids: list[int] | None = None) -> set[tuple[str, str, int]]:
+        """(platform, channel_item_code, std_item_id) of listings a person has reviewed and graded SAME. Only these may
+        drive prices and alerts when `require_confirmed_match` is on (SRS F-08-2.3)."""
+        sql = "SELECT platform, channel_item_code, std_item_id FROM product_channel_map WHERE reviewed_at IS NOT NULL AND match_grade = 'SAME'"
+        if item_ids is not None:
+            if not item_ids:
+                return set()
+            sql += " AND std_item_id IN (" + ",".join(str(int(i)) for i in item_ids) + ")"
+        return {(r["platform"], r["channel_item_code"], int(r["std_item_id"])) for r in self._rows(sql)}
+
+    def competitor_snapshots(self, std_item_id: int, since: datetime, region: str | None = None,
+                             confirmed_only: bool = False) -> list[dict[str, Any]]:
+        """Newest snapshot per (platform, channel_item_code) at or after `since`. `normalized_unit_price` is the
+        EFFECTIVE unit price (after coupon, shipping and bonus units); the shown-price figure is `listed_unit_price`."""
+        sql = ("SELECT platform, channel_item_code, std_item_id, COALESCE(effective_unit_price, normalized_unit_price) "
+               "AS normalized_unit_price, normalized_unit_price AS listed_unit_price, is_out_of_stock, match_confidence, "
                "region_code, scraped_at FROM ext_retail_prices WHERE std_item_id=:i AND scraped_at >= :since")
         params: dict[str, Any] = {"i": std_item_id, "since": since}
         if region:
             sql += " AND region_code = :r"
             params["r"] = region
-        return newest_per_listing(self._rows(sql, **params))
+        rows = newest_per_listing(self._rows(sql, **params))
+        if confirmed_only:
+            ok = self.confirmed_listings([std_item_id])
+            rows = [r for r in rows if (r["platform"], r["channel_item_code"], int(r["std_item_id"])) in ok]
+        return rows
+
+    # ---- product matches (SKU <-> competitor listing) --------------------------------------------------------
+    def list_matches(self, item_ids: list[int] | None = None, only_unconfirmed: bool = False) -> list[dict[str, Any]]:
+        sql = ("SELECT c.platform, c.channel_item_code, c.std_item_id, c.match_method, c.match_confidence, c.match_grade, "
+               "c.reviewed_by, c.reviewed_at, m.item_name, m.category_l, m.category_m, "
+               "(SELECT r.product_title FROM ext_retail_prices r WHERE r.platform = c.platform AND "
+               "r.channel_item_code = c.channel_item_code ORDER BY r.scraped_at DESC LIMIT 1) AS product_title "
+               "FROM product_channel_map c JOIN master_products m ON m.std_item_id = c.std_item_id WHERE 1=1")
+        if only_unconfirmed:
+            sql += " AND c.reviewed_at IS NULL"
+        if item_ids is not None:
+            if not item_ids:
+                return []
+            sql += " AND c.std_item_id IN (" + ",".join(str(int(i)) for i in item_ids) + ")"
+        sql += " ORDER BY m.item_name, c.platform, c.channel_item_code"
+        out = []
+        for r in self._rows(sql):
+            r["match_confidence"], r["reviewed_at"] = _dec(r["match_confidence"]), _dt(r["reviewed_at"])
+            out.append(r)
+        return out
+
+    def get_match(self, platform: str, code: str) -> dict[str, Any] | None:
+        r = self._rows("SELECT c.*, m.category_l, m.category_m FROM product_channel_map c JOIN master_products m "
+                       "ON m.std_item_id = c.std_item_id WHERE c.platform=:p AND c.channel_item_code=:c", p=platform, c=code)
+        return r[0] if r else None
+
+    def listing_seen(self, platform: str, code: str) -> bool:
+        return bool(self._rows("SELECT 1 AS x FROM ext_retail_prices WHERE platform=:p AND channel_item_code=:c LIMIT 1", p=platform, c=code))
+
+    def save_match(self, platform: str, code: str, std_item_id: int, grade: str, actor: str, now: datetime) -> None:
+        """Confirm (or re-grade) a match by hand. Creates the row when the listing was never proposed."""
+        p = self._b({"p": platform, "c": code, "i": std_item_id, "g": grade, "a": actor, "t": now})
+        with self._e.begin() as c:
+            n = c.execute(text("UPDATE product_channel_map SET std_item_id=:i, match_method='MANUAL', match_confidence=1, "
+                               "match_grade=:g, reviewed_by=:a, reviewed_at=:t WHERE platform=:p AND channel_item_code=:c"), p).rowcount
+            if not n:
+                c.execute(text("INSERT INTO product_channel_map (platform, channel_item_code, std_item_id, pack_size_factor, "
+                               "match_method, match_confidence, match_grade, reviewed_by, reviewed_at) "
+                               "VALUES (:p, :c, :i, 1, 'MANUAL', 1, :g, :a, :t)"), p)
+
+    def remove_match(self, platform: str, code: str) -> bool:
+        with self._e.begin() as c:
+            return c.execute(text("DELETE FROM product_channel_map WHERE platform=:p AND channel_item_code=:c"),
+                             {"p": platform, "c": code}).rowcount == 1
 
     def wholesale_change_pct(self, std_item_id: int) -> Decimal | None:
         """Mean normalized benchmark price: newest recorded_date vs the one before it."""

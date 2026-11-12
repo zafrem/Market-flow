@@ -162,7 +162,7 @@ def test_three_way_matrix_content(world):
     apple = matrix_items(world, "md_fruit")[0]
     assert apple["public_benchmark"] == {"recorded_date": "2026-11-03", "unit": "100g", "normalized_price": "523.00"}
     assert apple["internal"]["current_selling_price"] == 10000 and apple["internal"]["margin_rate"] == "15.85"
-    assert apple["competitors"] == {"listings": 1, "out_of_stock": 0, "lowest_unit_price": "700.00", "lowest_pack_price": "8400.00"}
+    assert apple["competitors"] == {"listings": 1, "unconfirmed": 0, "out_of_stock": 0, "lowest_unit_price": "700.00", "lowest_pack_price": "8400.00"}
     onion = matrix_items(world, "md_veg")[0]
     assert onion["public_benchmark"] is None and onion["competitors"]["listings"] == 0 and onion["remaining_days"] == 2
 

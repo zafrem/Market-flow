@@ -10,7 +10,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from .decision.calc import price_floor
+from .decision.calc import disposal_cost, price_floor
 from .decision.config import load_decision_config
 from .ops_repo import OpsRepository
 from .rules import current_rules
@@ -131,6 +131,7 @@ def import_erp(path: Path | str, repo: OpsRepository, settings: Settings, tp: Ti
             n = {k: _num(get(k), k) for k in ("purchase_cost", "fixed_cost", "logistics_cost")}
             fee = _num(get("channel_fee_rate"), "channel_fee_rate", max_=Decimal(100))
             promo = _num(get("promo_cost") or 0, "promo_cost")
+            disposal = _num(get("disposal_cost"), "disposal_cost") if str(get("disposal_cost") or "").strip() else None
             price = int(_num(get("current_selling_price"), "current_selling_price", integer=True))
             stock = int(_num(get("stock_qty"), "stock_qty", integer=True))
             sales = int(_num(get("daily_sales_qty"), "daily_sales_qty", integer=True))
@@ -145,7 +146,8 @@ def import_erp(path: Path | str, repo: OpsRepository, settings: Settings, tp: Ti
                 floor = int(_num(get("min_price_floor"), "min_price_floor", integer=True))
             else:
                 cfg = load_decision_config(settings.decision, item["category_l"])
-                floor = price_floor(n["purchase_cost"], n["fixed_cost"], n["logistics_cost"], promo, fee, vat, cfg)
+                floor = price_floor(n["purchase_cost"], n["fixed_cost"], n["logistics_cost"], promo, fee, vat, cfg,
+                                    disposal=disposal_cost(n["purchase_cost"], disposal, cfg.disposal_rate_pct))
             life = {k: (int(_num(get(k), k, integer=True)) if str(get(k) or "").strip() else None)
                     for k in ("remaining_days", "holding_age_days")}
         except ValueError as e:
@@ -154,7 +156,7 @@ def import_erp(path: Path | str, repo: OpsRepository, settings: Settings, tp: Ti
             continue
         seen.add(key)
         rows.append({"recorded_date": day, "std_item_id": item["std_item_id"], "internal_sku": sku, "channel_name": channel,
-                     **n, "channel_fee_rate": fee, "promo_cost": promo, "vat_inclusive": int(vat), "pack_std_units": pack,
+                     **n, "channel_fee_rate": fee, "promo_cost": promo, "disposal_cost": disposal, "vat_inclusive": int(vat), "pack_std_units": pack,
                      "current_selling_price": price, "stock_qty": stock, "daily_sales_qty": sales,
                      "min_price_floor": floor, "lifecycle_metric": life})
     res.loaded = repo.replace_inventory(rows)

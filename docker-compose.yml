@@ -32,6 +32,8 @@ services:
       GARAK_API_KEY: ${GARAK_API_KEY:-}
       ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}      # vision (flyer reading); empty = disabled
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       TZ: Asia/Seoul
     volumes:
       - ./config:/app/config   # edit rules / approved overrides without rebuilding

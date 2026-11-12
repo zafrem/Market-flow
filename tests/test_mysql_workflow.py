@@ -24,7 +24,7 @@ from marketflow.time_provider import FixedTimeProvider
 
 URL = os.getenv("MARKETFLOW_TEST_DB_URL")
 pytestmark = [pytest.mark.mysql, pytest.mark.skipif(not URL, reason="MARKETFLOW_TEST_DB_URL not set")]
-CLEAN = ["audit_log", "alert_log", "review_queue", "selector_candidates", "price_recommendations", "user_preferences",
+CLEAN = ["product_channel_map", "audit_log", "alert_log", "review_queue", "selector_candidates", "price_recommendations", "user_preferences",
          "user_category_assignments", "user_watchlists", "users", "ext_retail_prices", "int_operations_inventory"]
 
 
@@ -139,3 +139,32 @@ def test_crawler_settings_runs_and_mi_upserts(env):
     mi.upsert_observations([{**row, "value": 2}])
     assert [r["value"] for r in mi.observations(5)] == [2]
     assert mi.tracked_keywords(5) == [] and mi.latest_period("MEDIA") == "2026-11-02"
+
+
+@pytest.mark.unconfirmed
+def test_match_confirmation_effective_price_and_disposal_on_mysql(env):
+    """New P0 SQL on real MySQL: product_channel_map upserts, confirmed-only snapshots, effective price, disposal column."""
+    from marketflow import matching
+    repo, tp, e, s = env
+    now = T0.replace(tzinfo=None)
+    SqlRepository(e).insert_retail([{
+        "scraped_at": now - timedelta(minutes=30), "platform": "SHOPB", "std_item_id": 1, "match_confidence": Decimal("0.9"),
+        "channel_item_code": "B1", "product_title": "사과 1.2kg", "original_price": 9000, "sale_price": 8400,
+        "normalized_unit_price": Decimal("700"), "is_out_of_stock": 0, "badge_info": None, "extraction_source": "SELECTOR",
+        "region_code": "SEOUL", "coupon_discount": 400, "shipping_fee": 0, "bonus_qty": Decimal("0"),
+        "effective_unit_price": Decimal("666.67")}])
+    assert SqlRepository(e).propose_matches([{"platform": "SHOPB", "channel_item_code": "B1", "std_item_id": 1, "match_confidence": Decimal("0.9")}], now) == 1
+    assert SqlRepository(e).propose_matches([{"platform": "SHOPB", "channel_item_code": "B1", "std_item_id": 1, "match_confidence": Decimal("0.9")}], now) == 0
+    since = now - timedelta(days=1)
+    assert repo.competitor_snapshots(1, since, confirmed_only=True) == []
+    assert [m["channel_item_code"] for m in repo.list_matches(None, True)] == ["B1"] and repo.list_matches(None, True)[0]["product_title"] == "사과 1.2kg"
+    matching.set_match(repo, tp, MD, "SHOPB", "B1", 1, "SIMILAR")
+    assert repo.confirmed_listings() == set()
+    matching.set_match(repo, tp, MD, "SHOPB", "B1", 1, "SAME")
+    snap = repo.competitor_snapshots(1, since, confirmed_only=True)
+    assert len(snap) == 1 and snap[0]["normalized_unit_price"] == Decimal("666.67") and snap[0]["listed_unit_price"] == Decimal("700.00")
+    assert repo.get_match("SHOPB", "B1")["reviewed_by"] == "kim"
+    inv = repo.inventory_on(T0.date())
+    assert inv and all(r["disposal_cost"] is None for r in inv)
+    matching.remove_match(repo, tp, MD, "SHOPB", "B1")
+    assert repo.confirmed_listings() == set()
