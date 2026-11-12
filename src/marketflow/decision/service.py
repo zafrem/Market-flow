@@ -9,6 +9,9 @@ from typing import Any
 from ..ops_repo import OpsRepository
 from ..settings import Settings
 from ..time_provider import TimeProvider, today_kst
+from decimal import Decimal
+
+from .calc import disposal_cost, net_margin, round_price, simulate_price_match
 from .config import load_decision_config
 from .engine import Context, Recommendation, evaluate
 
@@ -78,7 +81,50 @@ def _move(repo: OpsRepository, tp: TimeProvider, rec_id: int, actor: Actor, expe
 
 
 def approve(repo: OpsRepository, tp: TimeProvider, rec_id: int, actor: Actor) -> None:
+    _require_decider(actor)
+    flags = _load(repo, rec_id, {"PENDING"})["flags"]
+    if flags.get("author") and flags["author"] == actor.name:
+        raise PermissionError("the author of a price change cannot approve it; ask another approver")
+    if flags.get("REQUIRES_ADMIN") and actor.role != "ADMIN":
+        raise PermissionError("this change is below the margin defense line: an administrator must approve it")
     _move(repo, tp, rec_id, actor, "PENDING", "APPROVED", "RECOMMENDATION_APPROVED")
+
+
+def create_draft(repo: OpsRepository, settings: Settings, tp: TimeProvider, actor: Actor, sku: str, channel: str,
+                 price: int, note: str = "") -> int:
+    """A person's own price-change proposal (SRS F-08-4.6). It goes through the same PENDING -> APPROVED -> APPLIED path as
+    a machine recommendation, with an evidence snapshot frozen at writing time. A price below the margin defense line
+    (the price floor, or any negative net margin) needs an ADMIN to approve; the author never approves their own draft."""
+    _require_decider(actor)
+    row = repo.inventory_latest(sku, channel)
+    if row is None:
+        raise WorkflowError(f"no inventory row for {sku}/{channel}")
+    if price <= 0:
+        raise WorkflowError("price must be positive")
+    now = _naive_utc(tp)
+    cfg = load_decision_config(settings.decision, row["category_l"])
+    current, floor = int(row["current_selling_price"]), int(row["min_price_floor"])
+    if price == current:
+        raise WorkflowError("the proposed price equals the current price")
+    cost = {"purchase": row["purchase_cost"], "packaging": row["fixed_cost"], "logistics": row["logistics_cost"], "promo": row["promo_cost"],
+            "fee_pct": row["channel_fee_rate"], "disposal": disposal_cost(row["purchase_cost"], row.get("disposal_cost"), cfg.disposal_rate_pct)}
+    vat = bool(row["vat_inclusive"])
+    sim = simulate_price_match(current, price, Decimal(row["daily_sales_qty"]) * 7, cost, vat, cfg.vat_rate)
+    amt, rate = net_margin(current, cost["purchase"], cost["packaging"], cost["logistics"], cost["promo"], cost["fee_pct"], vat, cfg.vat_rate, disposal=cost["disposal"])
+    comps = repo.competitor_snapshots(row["std_item_id"], now - timedelta(hours=float(cfg.competitor_max_age_hours)), None, confirmed_only=cfg.require_confirmed_match)
+    live = [c for c in comps if not c["is_out_of_stock"]]
+    low = min((c["normalized_unit_price"] for c in live), default=None)
+    below = price < floor or Decimal(sim["expected_margin_amount"]) < 0
+    flags = {"DRAFT": True, "author": actor.name, "BELOW_DEFENSE_LINE": below, "REQUIRES_ADMIN": below,
+             "metrics": {"internal_sku": sku, "margin_amount": str(amt), "margin_rate": str(rate), "floor": floor, "match_simulation": sim},
+             "evidence": {"note": note[:500], "author": actor.name, "created_at": now.isoformat(sep=" "),
+                          "as_of": {"inventory_date": str(row["recorded_date"]), "competitor_scraped_at": max((c["scraped_at"].isoformat(sep=" ") for c in comps), default=None)},
+                          "current_price": current, "proposed_price": price, "floor": floor,
+                          "competitor": {"listings": len(live), "lowest_effective_pack_price": None if low is None else str((low * row["pack_std_units"]).quantize(Decimal("0.01")))}}}
+    rec = Recommendation(int(row["std_item_id"]), channel, sku, current, price, "MANUAL_DRAFT", flags, "PENDING")
+    rec_id = repo.insert_recommendation(rec, now)
+    repo.audit(actor.name, "DRAFT_CREATED", {"sku": sku, "price": current}, {"rec_id": rec_id, "price": price, "below_defense_line": below}, now)
+    return rec_id
 
 
 def reject(repo: OpsRepository, tp: TimeProvider, rec_id: int, actor: Actor) -> None:

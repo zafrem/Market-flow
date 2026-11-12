@@ -159,5 +159,5 @@ def import_erp(path: Path | str, repo: OpsRepository, settings: Settings, tp: Ti
                      **n, "channel_fee_rate": fee, "promo_cost": promo, "disposal_cost": disposal, "vat_inclusive": int(vat), "pack_std_units": pack,
                      "current_selling_price": price, "stock_qty": stock, "daily_sales_qty": sales,
                      "min_price_floor": floor, "lifecycle_metric": life})
-    res.loaded = repo.replace_inventory(rows)
+    res.loaded = repo.replace_inventory(rows, tp.now().replace(tzinfo=None))
     return res

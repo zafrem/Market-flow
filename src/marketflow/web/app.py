@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.engine import Engine
 
 from .. import curation, matching
+from ..snapshot import snapshot as take_snapshot
 from ..db import init_sqlite, make_engine
 from ..decision import service
 from ..decision.service import Actor, WorkflowError
@@ -39,6 +40,13 @@ Role = Literal["ADMIN", "MD", "BUYER"]
 class LoginIn(BaseModel):
     email: str = Field(max_length=255)
     password: str = Field(max_length=256)
+
+
+class DraftIn(BaseModel):
+    internal_sku: str = Field(min_length=1, max_length=50)
+    channel_name: str = Field(min_length=1, max_length=50)
+    price: int = Field(gt=0, le=100_000_000)
+    note: str = Field(default="", max_length=500)
 
 
 class SynonymIn(BaseModel):
@@ -98,7 +106,7 @@ def mask_internal(role: str, internal: dict[str, Any]) -> dict[str, Any]:
 def mask_recommendation(role: str, rec: dict[str, Any]) -> dict[str, Any]:
     if role != "BUYER":
         return rec
-    flags = {k: v for k, v in rec["flags"].items() if k != "LOW_MARGIN"}
+    flags = {k: v for k, v in rec["flags"].items() if k not in {"LOW_MARGIN", "evidence"}}
     if "metrics" in flags:
         flags["metrics"] = {k: v for k, v in flags["metrics"].items() if k not in {"margin_amount", "margin_rate", "floor", "match_simulation"}}
     return {**rec, "flags": flags}
@@ -238,6 +246,21 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
             raise HTTPException(422, "unknown status")
         return {"recommendations": [mask_recommendation(user.role, r) for r in repo.recommendations_view(user.scope, status)]}
 
+    @app.post("/recommendations/draft", status_code=201)
+    def draft(body: DraftIn, user: CurrentUser = Depends(current_user)):
+        """MD/ADMIN propose a price change from the comparison sheet. Below the defense line it needs an admin's approval."""
+        if user.role not in service.DECIDERS:
+            raise HTTPException(403, "MD or admin only")
+        row = repo.inventory_latest(body.internal_sku, body.channel_name)
+        if row is None or not in_scope(user.scope, row["category_l"], row["category_m"]):
+            raise HTTPException(404, "SKU not found")
+        try:
+            rec_id = service.create_draft(repo, settings, tp, Actor(user.email, user.role), body.internal_sku, body.channel_name, body.price, body.note)
+        except WorkflowError as e:
+            raise HTTPException(409, str(e)) from e
+        rec = repo.get_recommendation(rec_id)
+        return {"rec_id": rec_id, "status": rec["status"], "requires_admin": bool(rec["flags"].get("REQUIRES_ADMIN"))}
+
     @app.post("/recommendations/{rec_id}/{action}")
     def act(rec_id: int, action: Literal["approve", "reject", "apply", "revert"], user: CurrentUser = Depends(current_user)):
         rec = repo.get_recommendation(rec_id)
@@ -266,6 +289,18 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
         except WorkflowError as e:
             raise HTTPException(409, str(e)) from e
         return {"id": item_id, "ok": True}
+
+    @app.get("/snapshot")
+    def point_in_time(date: str, known_at: str | None = None, user: CurrentUser = Depends(require_decider)):
+        """Cost, price and margin of one day as the system knew them at `known_at` (UTC, ISO). Without it: as known now."""
+        try:
+            day = datetime.fromisoformat(date).date()
+            moment = datetime.fromisoformat(known_at).replace(tzinfo=None) if known_at else None
+        except ValueError as e:
+            raise HTTPException(422, "date and known_at must be ISO formatted (YYYY-MM-DD, YYYY-MM-DDTHH:MM:SS UTC)") from e
+        rows = [r for r in take_snapshot(repo, settings, day, moment) if in_scope(user.scope, r["category_l"], r["category_m"])]
+        repo.audit(user.email, "SNAPSHOT_READ", None, {"date": str(day), "known_at": known_at, "rows": len(rows)}, now())
+        return {"date": str(day), "known_at": known_at, "rows": rows}
 
     # ---- product matches: which competitor listings count as "the same product" (MD / ADMIN) --------------------
     @app.get("/matches")

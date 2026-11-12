@@ -516,3 +516,22 @@ test("search gap tab explains itself when empty", async () => {
   const t = boot(); await t.login();
   assert.match(text(t.d.querySelector("#gap-table tbody")), /No search-to-purchase gaps/);
 });
+
+test("an MD proposes a price from the matrix row; the proposal carries the SKU, price and reason", async () => {
+  const t = boot({ routes: { "POST /recommendations/draft": () => [201, { rec_id: 9, status: "PENDING", requires_admin: true }] } }); await t.login();
+  await t.click(firstRow(t).querySelector("button.link"));
+  const row = t.d.querySelector("tr.draft-row");
+  row.querySelector('input[type=number]').value = "9100"; row.querySelector('input[type=text]').value = "match the market";
+  await t.click([...row.querySelectorAll("button")].find((b) => text(b) === "Submit proposal"));
+  const post = t.calls.find((c) => c.method === "POST" && c.path === "/recommendations/draft");
+  assert.deepEqual(JSON.parse(post.body), { internal_sku: "APPLE-1", channel_name: "SHOPA", price: 9100, note: "match the market" });
+  assert.match(text(t.d.querySelector("#toast")), /Proposal #9 submitted; it is below the defense line/);
+  assert.equal(t.d.querySelector("tr.draft-row"), null);
+  await t.click(firstRow(t).querySelector("button.link")); await t.click(firstRow(t).querySelector("button.link"));      // toggles open and closed
+  assert.equal(t.d.querySelector("tr.draft-row"), null);
+});
+
+test("BUYER cannot propose prices", async () => {
+  const t = boot({ role: "BUYER" }); await t.login();
+  assert.equal(firstRow(t).querySelector("button.link").hidden, true);
+});

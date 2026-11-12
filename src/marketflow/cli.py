@@ -45,6 +45,7 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
     p = sub.add_parser("export-prices"); p.add_argument("--since"); p.add_argument("--file")
     p = sub.add_parser("import-mi"); p.add_argument("--errors-file", help="write every rejected cell with its reason to this CSV"); p.add_argument("file"); p.add_argument("--type", required=True); p.add_argument("--source", default="")
     p = sub.add_parser("synonym"); p.add_argument("alias"); p.add_argument("canonical", nargs="?"); p.add_argument("--remove", action="store_true")
+    p = sub.add_parser("snapshot"); p.add_argument("date"); p.add_argument("--known-at", help="UTC ISO time: what the system knew then")
     sub.add_parser("synonyms"); sub.add_parser("classify-eval")
     p = sub.add_parser("mi-report"); p.add_argument("--stable", action="store_true"); p.add_argument("--lang", choices=["en", "ko"], default="en")
     sub.add_parser("crawlers")
@@ -188,6 +189,16 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
                 w.writerows((e.line, e.field, e.message) for e in res.errors)
             print(f"rejected cells written to {a.errors_file}", file=out)
         return 1 if res.errors and res.loaded == 0 else 0
+    if a.cmd == "snapshot":
+        from .snapshot import snapshot
+        try:
+            rows = snapshot(repo, settings, date.fromisoformat(a.date), datetime.fromisoformat(a.known_at).replace(tzinfo=None) if a.known_at else None)
+        except ValueError as e:
+            print(f"refused: {e}", file=out); return 2
+        for r in rows:
+            print(f"{r['recorded_date']} {r['internal_sku']}/{r['channel_name']} price={r['current_selling_price']} cost={r['purchase_cost']} "
+                  f"margin={r['margin_rate']}% (known since {r['known_since']})", file=out)
+        return 0
     if a.cmd in {"synonym", "synonyms", "classify-eval"}:
         from .mi.classify import evaluate
         from .mi.store import MiStore

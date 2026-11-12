@@ -159,9 +159,30 @@ async function loadMatrix() {
       loadMatrix();
     };
     const starCell = el("td"); starCell.append(star);
+    const draftBtn = el("button", t("draft.open"), "link decider"); draftBtn.hidden = me.role === "BUYER";
+    draftBtn.onclick = () => toggleDraftRow(tr, r);
+    ours.append(draftBtn);
     tr.append(name, el("td", r.channel_name), bench, ours, margin, comp, matchedCell(r), el("td", won(r.stock_qty) + (r.remaining_days != null ? " (D-" + r.remaining_days + ")" : ""), "num"), starCell);
     body.append(tr);
   }
+}
+
+// A person's own price proposal, written from the comparison row. Below the defense line it needs an administrator's approval.
+function toggleDraftRow(tr, r) {
+  const next = tr.nextElementSibling;
+  if (next && next.classList.contains("draft-row")) { next.remove(); return; }
+  const row = el("tr", "", "draft-row"), td = el("td"); td.colSpan = 9;
+  const price = el("input"); price.type = "number"; price.min = "1"; price.step = "1"; price.required = true; price.setAttribute("aria-label", t("draft.price")); price.placeholder = t("draft.price");
+  const note = el("input"); note.type = "text"; note.maxLength = 500; note.setAttribute("aria-label", t("draft.note")); note.placeholder = t("draft.note");
+  const send = el("button", t("draft.send")), cancel = el("button", t("draft.cancel"));
+  cancel.onclick = () => row.remove();
+  send.onclick = async () => {
+    try {
+      const res = await api("/recommendations/draft", { method: "POST", body: JSON.stringify({ internal_sku: r.internal_sku, channel_name: r.channel_name, price: Number(price.value), note: note.value }) });
+      toast(t(res.requires_admin ? "draft.done_admin" : "draft.done", { id: res.rec_id })); row.remove(); await loadRecs();
+    } catch (e) { toast(e.message); }
+  };
+  td.append(price, note, send, cancel); row.append(td); tr.after(row);
 }
 
 // What matching the lowest confirmed competitor would do: expected margin and the weekly volume that earns today's total margin.

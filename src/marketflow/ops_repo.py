@@ -63,13 +63,22 @@ class OpsRepository:
         vals = [_dec(r["alert_margin_bep"]) for r in rows]
         return max(vals) if vals else None
 
-    def replace_inventory(self, rows: list[dict[str, Any]]) -> int:
-        """Idempotent load keyed by (recorded_date, internal_sku, channel_name): delete + insert, one transaction."""
+    _REV_COLS = ("recorded_date", "internal_sku", "channel_name", "std_item_id", "purchase_cost", "fixed_cost", "logistics_cost",
+                 "channel_fee_rate", "promo_cost", "disposal_cost", "vat_inclusive", "pack_std_units", "current_selling_price",
+                 "stock_qty", "daily_sales_qty", "min_price_floor", "lifecycle_metric")
+
+    def replace_inventory(self, rows: list[dict[str, Any]], ingested_at: datetime | None = None) -> int:
+        """Idempotent load keyed by (recorded_date, internal_sku, channel_name): delete + insert, one transaction.
+        Every load also appends a revision stamped with `ingested_at`, so what the system knew on a past day stays readable
+        after a retroactive correction (SRS F-08-1.4: occurred time = recorded_date, ingested time = this stamp)."""
         if not rows:
             return 0
+        stamp = ingested_at or datetime.utcnow()
         with self._e.begin() as c:
             for r in rows:
                 p = self._b({"disposal_cost": None, **r, "lifecycle_metric": json.dumps(r["lifecycle_metric"])})
+                c.execute(text(f"INSERT INTO inventory_revisions (ingested_at, {', '.join(self._REV_COLS)}) VALUES (:ingested_at, "
+                               f"{', '.join(':' + k for k in self._REV_COLS)})"), {**p, "ingested_at": self._b({'t': stamp})['t']})
                 c.execute(text("DELETE FROM int_operations_inventory WHERE recorded_date=:recorded_date AND "
                                "internal_sku=:internal_sku AND channel_name=:channel_name"), p)
                 c.execute(text("INSERT INTO int_operations_inventory (recorded_date, std_item_id, internal_sku, channel_name, "
@@ -91,6 +100,40 @@ class OpsRepository:
             r["lifecycle_metric"] = json.loads(r["lifecycle_metric"]) if isinstance(r["lifecycle_metric"], str) else r["lifecycle_metric"]
             out.append(r)
         return out
+
+    def inventory_as_known(self, day: date, known_at: datetime | None = None) -> list[dict[str, Any]]:
+        """Inventory of `day` as the system knew it at `known_at` (None = as known now): the newest revision ingested at or
+        before that moment for each SKU/channel. Reads only the revision history, so later corrections never rewrite the past."""
+        sql = ("SELECT r.*, m.category_l, m.category_m, m.item_name FROM inventory_revisions r JOIN master_products m USING (std_item_id) "
+               "WHERE r.recorded_date = :d" + (" AND r.ingested_at <= :k" if known_at is not None else "") + " ORDER BY r.internal_sku, r.channel_name, r.ingested_at, r.rev_id")
+        params: dict[str, Any] = {"d": day}
+        if known_at is not None:
+            params["k"] = known_at
+        newest: dict[tuple[str, str], dict[str, Any]] = {}
+        for r in self._rows(sql, **params):
+            newest[(r["internal_sku"], r["channel_name"])] = r
+        out = []
+        for r in newest.values():
+            for k in ("purchase_cost", "fixed_cost", "logistics_cost", "channel_fee_rate", "promo_cost", "pack_std_units"):
+                r[k] = _dec(r[k])
+            r["disposal_cost"] = None if r.get("disposal_cost") is None else _dec(r["disposal_cost"])
+            r["lifecycle_metric"] = json.loads(r["lifecycle_metric"]) if isinstance(r["lifecycle_metric"], str) else r["lifecycle_metric"]
+            r["ingested_at"] = _dt(r["ingested_at"])
+            out.append(r)
+        return out
+
+    def inventory_latest(self, sku: str, channel: str) -> dict[str, Any] | None:
+        """Newest inventory row of one SKU/channel, typed like inventory_on()."""
+        rows = self._rows("SELECT i.*, m.category_l, m.category_m, m.item_name FROM int_operations_inventory i JOIN master_products m USING (std_item_id) "
+                          "WHERE i.internal_sku = :s AND i.channel_name = :c ORDER BY i.recorded_date DESC LIMIT 1", s=sku, c=channel)
+        if not rows:
+            return None
+        r = rows[0]
+        for k in ("purchase_cost", "fixed_cost", "logistics_cost", "channel_fee_rate", "promo_cost", "pack_std_units"):
+            r[k] = _dec(r[k])
+        r["disposal_cost"] = None if r.get("disposal_cost") is None else _dec(r["disposal_cost"])
+        r["lifecycle_metric"] = json.loads(r["lifecycle_metric"]) if isinstance(r["lifecycle_metric"], str) else r["lifecycle_metric"]
+        return r
 
     def sales_history(self, sku: str, channel: str, upto: date, n: int = 3) -> list[int]:
         rows = self._rows("SELECT daily_sales_qty FROM int_operations_inventory WHERE internal_sku=:s AND channel_name=:c "

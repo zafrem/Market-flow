@@ -151,3 +151,9 @@ small { color: var(--ink-2); font-weight: 400; font-size: 12px; }
 @media (prefers-reduced-motion: no-preference) {
   .fig, tbody tr { transition: background-color .12s; }
 }
+
+/* P1: proposal row, small link-style button, period-over-period note */
+button.link { background: none; border: 0; padding: 2px 0; margin-top: 4px; color: var(--brand); text-decoration: underline; cursor: pointer; font: inherit; font-size: 12px; display: block; }
+tr.draft-row td { background: var(--raised); }
+tr.draft-row input { margin-right: 8px; min-width: 140px; }
+td small.pop { display: block; font-variant-numeric: tabular-nums; white-space: nowrap; }
