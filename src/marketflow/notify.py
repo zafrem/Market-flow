@@ -60,9 +60,10 @@ async def _httpx_post(url: str, payload: dict[str, Any]) -> int:
 class Notifier:
     def __init__(self, webhook_url: str, queues: QueueMixin, tp: TimeProvider, *, post: Post = _httpx_post,
                  sleep: Callable[[float], Awaitable[None]] = asyncio.sleep, window_hours: float = 24,
-                 max_per_run: int = 20, max_attempts: int = 5, base_delay: float = 1.0):
+                 max_per_run: int = 20, max_attempts: int = 5, base_delay: float = 1.0, digest: bool = False):
         self._url = validate_webhook(webhook_url) if webhook_url else ""
         self._q, self._tp, self._post, self._sleep = queues, tp, post, sleep
+        self._digest = digest                                  # opt-in: everything below RED goes out as one message per run
         self._window, self._cap, self._attempts, self._base = timedelta(hours=window_hours), max_per_run, max_attempts, base_delay
 
     def _now(self):
@@ -83,6 +84,20 @@ class Notifier:
             for a in fresh:
                 log.warning("ALERT (no webhook configured) [%s] %s", a.severity, a.text)
             return res
+        folded: list[Alert] = []
+        if self._digest:                                       # RED stays individual; the rest becomes one summary
+            folded = [a for a in fresh if a.severity != "RED"]
+            fresh = [a for a in fresh if a.severity == "RED"]
+            if len(folded) > 1:
+                lines = "\n".join(f"{SEVERITY_ICON.get(a.severity, '')} {slack_escape(a.text)}".strip() for a in folded)
+                head = Alert(f"DIGEST:{self._now():%Y-%m-%d %H}", "INFO", f"MarketFlow summary: {len(folded)} items")
+                await self._send_one(head, f"{SEVERITY_ICON['INFO']} {head.text}\n{lines}", res)
+                if res.keys_sent and res.keys_sent[-1] == head.key:
+                    for a in folded:                           # remember each item so it is not repeated tomorrow
+                        self._q.log_alert(a.key, "SENT", 1, None, "(in digest)", self._now())
+                folded = []
+            else:
+                fresh += folded
         to_send, rest = fresh[: self._cap], fresh[self._cap:]
         res.overflow = len(rest)
         for a in to_send:

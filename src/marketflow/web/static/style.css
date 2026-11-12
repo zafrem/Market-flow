@@ -3,18 +3,19 @@
    reserved for state and always travel with an icon and a word. */
 :root {
   color-scheme: light;
-  --ground: #e9efec;  --surface: #fcfcfb;  --raised: #f3f6f4;
+  --ground: #e4ebe7;  --surface: #fdfdfc;  --raised: #f1f5f2;  --rail: #0d3b2f;  --rail-ink: #cfe3da;  --rail-dim: #8fb3a4;
   --ink: #14231c;  --ink-2: #4a5a52;  --line: #d5ded9;  --line-strong: #b9c7c0;
   --brand: #0f5c47;  --brand-ink: #ffffff;  --brand-soft: #dcebe5;
   --s-wholesale: #2a78d6;  --s-ours: #eb6834;  --s-comp: #1baf7a;
   --good: #006300;  --warn: #8a5a00;  --bad: #b3261e;
   --shadow: 0 1px 2px rgba(20, 35, 28, .06), 0 4px 14px rgba(20, 35, 28, .05);
-  --radius: 10px;
+  --radius: 12px;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --ground: #101412;  --surface: #1a1a19;  --raised: #222422;
+    --ground: #0e1210;  --surface: #181b19;  --raised: #212522;  --rail: #0a1f18;  --rail-ink: #cfe3da;  --rail-dim: #7fa393;
     --ink: #eef2ef;  --ink-2: #a9b7af;  --line: #2c3631;  --line-strong: #43534b;
     --brand: #4cb894;  --brand-ink: #0c1a14;  --brand-soft: #1d2e27;
     --s-wholesale: #3987e5;  --s-ours: #d95926;  --s-comp: #199e70;
@@ -157,3 +158,80 @@ button.link { background: none; border: 0; padding: 2px 0; margin-top: 4px; colo
 tr.draft-row td { background: var(--raised); }
 tr.draft-row input { margin-right: 8px; min-width: 140px; }
 td small.pop { display: block; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+
+/* ================= v2 layout: a dark rail for navigation, a quiet ledger for data ================= */
+header { background: var(--rail); border-bottom: 0; padding: 10px 28px; color: var(--rail-ink); }
+.brand svg .tag { fill: #4cb894; } .brand svg .hole { fill: var(--rail); } .brand svg .stroke { stroke: var(--rail); }
+h1 { color: #fff; font-size: 17px; letter-spacing: .01em; }
+#lang, #who button { background: transparent; color: var(--rail-ink); border-color: #2f6554; }
+#lang:hover, #who button:hover { background: #164d3d; color: #fff; border-color: #4cb894; }
+#who { color: var(--rail-dim); }
+
+#app:not([hidden]) { display: grid; grid-template-columns: 216px minmax(0, 1fr); column-gap: 28px; align-items: start; }
+#app > * { grid-column: 2; min-width: 0; }
+#app > nav { grid-column: 1; grid-row: 1 / span 40; position: sticky; top: 16px; flex-direction: column; gap: 2px; overflow: visible;
+             margin: 0; padding: 10px; border: 0; border-radius: var(--radius); background: var(--rail); }
+nav button { text-align: left; border: 0; border-radius: 8px; margin: 0; padding: 9px 12px; color: var(--rail-ink); font-weight: 500;
+             border-left: 3px solid transparent; }
+nav button:hover { background: #164d3d; color: #fff; }
+nav button.active { background: #1c5d4a; color: #fff; border-left-color: #6fd6b2; font-weight: 700; }
+nav .badge { float: right; background: #6fd6b2; color: #0d3b2f; }
+nav button.decider:first-of-type { margin-top: 0; }
+
+.summary { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0; background: var(--surface); border: 1px solid var(--line);
+           border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.fig { border: 0; border-radius: 0; box-shadow: none; padding: 14px 18px; border-right: 1px solid var(--line); background: none; }
+.fig:last-child { border-right: 0; }
+.fig b { font-size: 28px; font-weight: 650; }
+.fig span { display: block; margin-top: 2px; }
+.fig.alert { box-shadow: inset 0 3px 0 var(--warn); }
+
+.scroll { box-shadow: var(--shadow); }
+th { text-transform: none; font-size: 12px; letter-spacing: .02em; border-bottom: 1px solid var(--line-strong); }
+td { padding: 12px 14px; }
+tbody tr { border-left: 3px solid transparent; }
+tbody tr:hover { background: var(--brand-soft); }
+.item { letter-spacing: -.005em; }
+td.num, .margin { font-family: var(--mono); font-size: 13px; letter-spacing: -.02em; }
+.pill { border-color: transparent; background: color-mix(in srgb, currentColor 12%, transparent); }
+.hint { max-width: 70ch; }
+.toolbar { padding: 2px 0; }
+button { transition: background-color .12s, border-color .12s, color .12s; }
+button.primary, form button { box-shadow: 0 1px 0 rgba(0,0,0,.12); }
+.crawl-list button.active { background: var(--brand-soft); }
+input[type=checkbox] { accent-color: var(--brand); width: 15px; height: 15px; }
+
+/* data-quality strip */
+.qstrip { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; padding: 0; list-style: none; }
+.qstrip li { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--surface); border: 1px solid var(--line);
+             border-radius: 999px; font-size: 12.5px; }
+.qstrip li::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--good); }
+.qstrip li.stale::before { background: var(--bad); } .qstrip li.low::before { background: var(--warn); }
+.qstrip small { font-family: var(--mono); }
+
+/* promotion calendar: a month-long lane per promotion */
+.promo-lane { position: relative; height: 10px; min-width: 220px; background: var(--raised); border-radius: 5px; }
+.promo-lane i { position: absolute; top: 0; bottom: 0; border-radius: 5px; background: var(--s-ours); opacity: .85; }
+.promo-lane i.past { background: var(--ink-2); opacity: .4; }
+.promo-lane b { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink); }
+
+@media (max-width: 900px) {
+  #app:not([hidden]) { display: block; }
+  #app > nav { position: static; flex-direction: row; overflow-x: auto; margin-bottom: 16px; }
+  nav button { border-left: 0; border-bottom: 3px solid transparent; }
+  nav button.active { border-bottom-color: #6fd6b2; }
+}
+
+/* promotion entry form: one row of compact fields */
+form.promo-form { max-width: none; margin: 0 0 14px; padding: 14px 16px; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); align-items: end; gap: 10px 12px; }
+form.promo-form input { width: 100%; font: inherit; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); }
+
+/* v2 tuning: keep the item column readable beside the rail */
+#app:not([hidden]) { grid-template-columns: 188px minmax(0, 1fr); column-gap: 22px; }
+td .item { white-space: nowrap; }
+td:first-child { min-width: 150px; }
+td:first-child small { display: block; white-space: nowrap; }
+th, td { padding-left: 12px; padding-right: 12px; }
+.toolbar .hint { flex: 1; text-align: left; }
+table { min-width: 860px; }

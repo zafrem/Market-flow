@@ -30,6 +30,7 @@ solo_mode = true       # env: SOLO_MODE
 [alerts]
 # Slack-compatible incoming webhook (https). Alerts carry margin data: point it at a channel only MD/ADMIN can read.
 webhook_url = ""       # env: ALERT_WEBHOOK_URL
+digest = false         # env: ALERTS_DIGEST. true: everything below RED goes out as one summary per run
 
 [llm]
 mock = true            # env: MOCK_LLM. Set false to use Gemini for self-healing extraction.

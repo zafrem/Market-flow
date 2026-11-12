@@ -137,7 +137,7 @@ async def main(argv: list[str]) -> int:
                       f"stored={r.stored} unmapped={len(r.unmapped)} unconvertible={len(r.unconvertible)}"))
             return 1 if any(isinstance(r, Exception) for r in results.values()) else 0
         prepare_db(engine, tp)
-        notifier = Notifier(settings.alert_webhook_url, Repo(engine), tp)
+        notifier = Notifier(settings.alert_webhook_url, Repo(engine), tp, digest=settings.alerts_digest)
         crawlers = CrawlerService(engine, settings, tp, transport, lambda: get_llm(settings), notifier)
         await asyncio.gather(build_scheduler(engine, settings, tp, notifier).run_forever(), crawlers.loop(asyncio.sleep))
     finally:

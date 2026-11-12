@@ -33,6 +33,8 @@ function boot({ role = "MD", routes = {} } = {}) {
     "GET /mi/report": () => [200, { health: [], radar: [], as_of: null, signals: [] }],
     "GET /crawlers": () => [200, { crawlers: [] }],
     "GET /matches": () => [200, { matches: [] }],
+    "GET /quality": () => [200, { crawlers: [], unparseable_titles: 0, unmapped_items: 0, unconfirmed_matches: 0, matches_to_recheck: 0, issues: [] }],
+    "GET /promotions": () => [200, { today: "2026-11-03", promotions: [] }],
     ...routes,
   };
   const dom = new JSDOM(html, { runScripts: "outside-only", url: "http://localhost/" });
@@ -534,4 +536,40 @@ test("an MD proposes a price from the matrix row; the proposal carries the SKU, 
 test("BUYER cannot propose prices", async () => {
   const t = boot({ role: "BUYER" }); await t.login();
   assert.equal(firstRow(t).querySelector("button.link").hidden, true);
+});
+
+
+// ---- P1: data-quality strip and promotion calendar -------------------------------------------------------------------
+test("quality strip shows a chip per crawler and what needs a person; stale ones are marked", async () => {
+  const q = { crawlers: [{ id: "news", enabled: true, configured: true, success_rate: 1, last_success_hours: 3, stale: false },
+                         { id: "buyer", enabled: true, configured: true, success_rate: 0.5, last_success_hours: 80, stale: true },
+                         { id: "flyer", enabled: false, configured: true, success_rate: null, last_success_hours: null, stale: false }],
+              unparseable_titles: 0, unmapped_items: 0, unconfirmed_matches: 4, matches_to_recheck: 0, issues: [] };
+  const t = boot({ routes: { "GET /quality": () => [200, q] } }); await t.login();
+  const chips = [...t.d.querySelectorAll("#qstrip li")];
+  assert.equal(t.d.querySelector("#qstrip").hidden, false);
+  assert.equal(chips.length, 3);                                                   // news, buyer, and the unconfirmed count (flyer is disabled)
+  assert.ok(chips[1].classList.contains("stale")); assert.match(text(chips[2]), /4/);
+});
+
+test("BUYER never loads quality or promotions", async () => {
+  const t = boot({ role: "BUYER" }); await t.login();
+  assert.ok(!t.calls.some((c) => c.path === "/quality" || c.path === "/promotions"));
+});
+
+test("promotion calendar: list with state and lane, add, remove", async () => {
+  const p = { promo_id: 7, name: "Chuseok", category_l: "Fresh", channel_name: "", start_date: "2026-11-01", end_date: "2026-11-09", discount_pct: "20.00", note: "", created_by: "k", state: "ACTIVE" };
+  const t = boot({ routes: { "GET /promotions": () => [200, { today: "2026-11-03", promotions: [p] }], "POST /promotions": () => [201, { promo_id: 8 }] } });
+  await t.login();
+  const row = t.d.querySelector("#promos-table tbody tr");
+  assert.match(text(row), /Chuseok/); assert.match(text(row), /Running/); assert.ok(row.querySelector(".promo-lane i"));
+  const f = t.d.querySelector("#promo-form");
+  f.elements.name.value = "Week"; f.elements.start_date.value = "2026-11-10"; f.elements.end_date.value = "2026-11-12"; f.elements.discount_pct.value = "15";
+  f.dispatchEvent(new t.w.Event("submit", { cancelable: true, bubbles: true })); await new Promise((r) => setTimeout(r, 20));
+  const post = t.calls.find((c) => c.method === "POST" && c.path === "/promotions");
+  assert.deepEqual(JSON.parse(post.body), { name: "Week", start_date: "2026-11-10", end_date: "2026-11-12", discount_pct: 15 });
+  await t.click([...row.querySelectorAll("button")].find((b) => text(b) === "Remove"));
+  assert.ok(t.calls.some((c) => c.method === "DELETE" && c.path === "/promotions/7"));
+  await t.click(t.d.querySelector("#lang"));
+  assert.match(text(t.d.querySelector("#promos-table tbody")), /진행 중/);
 });

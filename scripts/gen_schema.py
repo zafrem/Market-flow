@@ -121,6 +121,19 @@ CREATE TABLE IF NOT EXISTS inventory_revisions (
   KEY idx_rev (recorded_date, internal_sku, channel_name, ingested_at)
 );
 
+CREATE TABLE IF NOT EXISTS promotions (
+  promo_id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(120) NOT NULL,
+  category_l VARCHAR(50) NOT NULL DEFAULT '' COMMENT 'empty = every category',
+  channel_name VARCHAR(50) NOT NULL DEFAULT '' COMMENT 'empty = every channel',
+  start_date DATE NOT NULL,
+  end_date DATE NOT NULL,
+  discount_pct DECIMAL(5,2) NULL,
+  note VARCHAR(255) NULL,
+  created_by VARCHAR(100) NOT NULL,
+  KEY idx_promo_dates (start_date, end_date)
+);
+
 CREATE TABLE IF NOT EXISTS product_channel_map (
   platform VARCHAR(30) NOT NULL,
   channel_item_code VARCHAR(100) NOT NULL,

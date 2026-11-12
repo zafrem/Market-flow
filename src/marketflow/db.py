@@ -51,6 +51,10 @@ SQLITE_DDL = [
         pack_std_units NUMERIC NOT NULL DEFAULT 1, current_selling_price INTEGER NOT NULL, stock_qty INTEGER NOT NULL,
         daily_sales_qty INTEGER NOT NULL, min_price_floor INTEGER NOT NULL, lifecycle_metric TEXT NOT NULL)""",
     "CREATE INDEX IF NOT EXISTS idx_rev ON inventory_revisions (recorded_date, internal_sku, channel_name, ingested_at)",
+    """CREATE TABLE IF NOT EXISTS promotions (
+        promo_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, category_l TEXT NOT NULL DEFAULT '',
+        channel_name TEXT NOT NULL DEFAULT '', start_date TEXT NOT NULL, end_date TEXT NOT NULL,
+        discount_pct NUMERIC, note TEXT, created_by TEXT NOT NULL)""",
     """CREATE TABLE IF NOT EXISTS product_channel_map (
         platform TEXT NOT NULL, channel_item_code TEXT NOT NULL,
         std_item_id INTEGER NOT NULL REFERENCES master_products (std_item_id),

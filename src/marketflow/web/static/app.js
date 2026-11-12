@@ -93,7 +93,8 @@ function renderWho() {
   const out = el("button", t("signout")); out.onclick = signOut;
   $("#who").replaceChildren(document.createTextNode(me.name + " · " + me.role + "  "), out);
 }
-const reloadAll = () => Promise.all([loadMatrix(), loadMi(), loadRecs(), ...(me.role === "BUYER" ? [] : [loadMatches(), loadReview(), loadSelectors(), loadCrawlers()])]);
+const TABS = ["matrix", "health", "radar", "gap", "crawlers", "recs", "matches", "promos", "review", "selectors"];
+const reloadAll = () => Promise.all([loadMatrix(), loadMi(), loadRecs(), ...(me.role === "BUYER" ? [] : [loadQuality(), loadPromos(), loadMatches(), loadReview(), loadSelectors(), loadCrawlers()])]);
 function setLang(l) {
   lang = l;
   try { localStorage.setItem("mf-lang", l); } catch (e) { /* storage blocked: the choice lasts until reload */ }
@@ -121,7 +122,7 @@ $("#login-form").addEventListener("submit", async (ev) => {
 
 document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => {
   document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("active", x === b));
-  for (const id of ["matrix", "health", "radar", "gap", "crawlers", "recs", "matches", "review", "selectors"]) $("#" + id).hidden = b.dataset.tab !== id;
+  for (const id of TABS) $("#" + id).hidden = b.dataset.tab !== id;
   if (b.dataset.tab === "crawlers" && crawlerId) history.replaceState(null, "", "#/crawlers/" + crawlerId);
 }));
 $("#only-watch").addEventListener("change", loadMatrix);
@@ -205,6 +206,49 @@ async function downloadFile(path, filename) {
   const a = el("a"); a.href = url; a.download = filename; document.body.append(a); a.click(); a.remove(); URL.revokeObjectURL(url);
 }
 $("#export-matrix").addEventListener("click", () => downloadFile("/matrix/export" + ($("#only-watch").checked ? "?watchlist=true" : ""), "marketflow-comparison.csv").catch((e) => toast(e.message)));
+
+// ---- data-quality strip: one chip per crawler, plus the counts that need a person ------------------------------------
+async function loadQuality() {
+  const q = await api("/quality"), strip = $("#qstrip"), chips = [];
+  for (const c of q.crawlers.filter((x) => x.enabled && x.configured)) {
+    const state = c.stale ? "stale" : (c.success_rate !== null && c.success_rate < 0.95) ? "low" : "ok";
+    const li = el("li", "", state === "ok" ? "" : state);
+    li.append(el("span", crawlerTitle(c.id)), el("small", state === "ok" ? (c.last_success_hours === null ? t("q.ok") : t("q.fresh_age", { h: c.last_success_hours })) : t("q." + state)));
+    chips.push(li);
+  }
+  for (const [n, key] of [[q.unconfirmed_matches, "q.unconfirmed"], [q.matches_to_recheck, "q.recheck"], [q.unparseable_titles, "q.unparsed"]]) {
+    if (n) { const li = el("li", "", "low"); li.append(el("span", t(key, { n }))); chips.push(li); }
+  }
+  strip.replaceChildren(...chips); strip.hidden = !chips.length;
+}
+
+// ---- promotion calendar -------------------------------------------------------------------------------------------
+const PROMO_BEFORE = 90, PROMO_AFTER = 30;
+async function loadPromos() {
+  const { today, promotions } = await api("/promotions");
+  const t0 = Date.parse(today + "T00:00:00Z"), from = t0 - PROMO_BEFORE * DAY_MS, span = (PROMO_BEFORE + PROMO_AFTER) * DAY_MS;
+  const pct = (iso) => Math.min(100, Math.max(0, (Date.parse(iso + "T00:00:00Z") - from) / span * 100));
+  const body = $("#promos-table tbody"); body.replaceChildren();
+  if (!promotions.length) emptyRow(body, 7, t("empty.promos"));
+  for (const p of promotions) {
+    const tr = el("tr"), lane = el("div", "", "promo-lane"), bar = el("i", "", p.state === "ENDED" ? "past" : ""), now = el("b");
+    const l = pct(p.start_date), r = pct(p.end_date) + 100 / (PROMO_BEFORE + PROMO_AFTER);
+    bar.style.left = l + "%"; bar.style.width = Math.max(1, Math.min(100, r) - l) + "%"; now.style.left = pct(today) + "%"; lane.append(bar, now);
+    const del = el("button", t("promos.remove"));
+    del.onclick = async () => { try { await api("/promotions/" + p.promo_id, { method: "DELETE" }); toast(""); await loadPromos(); } catch (e) { toast(e.message); } };
+    const name = el("td"); name.append(el("span", p.name, "item")); if (p.discount_pct) name.append(el("small", Number(p.discount_pct) + "%"));
+    const st = el("td"); st.append(el("span", t("pstate." + p.state), "status " + (p.state === "ACTIVE" ? "green" : p.state === "UPCOMING" ? "amber" : "")));
+    const tl = el("td"); tl.append(lane); const act = el("td"); act.append(del);
+    tr.append(name, el("td", p.category_l || t("promos.all")), el("td", p.channel_name || t("promos.all")), el("td", p.start_date + " – " + p.end_date, "num"), tl, st, act);
+    body.append(tr);
+  }
+}
+$("#promo-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const f = new FormData(ev.target), body = Object.fromEntries([...f.entries()].filter(([, v]) => v !== ""));
+  if (body.discount_pct !== undefined) body.discount_pct = Number(body.discount_pct);
+  try { await api("/promotions", { method: "POST", body: JSON.stringify(body) }); toast(""); ev.target.reset(); await loadPromos(); } catch (e) { toast(e.message); }
+});
 
 async function loadMatches() {
   const { matches } = await api("/matches");
@@ -364,7 +408,7 @@ const crawlerTitle = (id) => t("crawler." + id + ".title");
 
 function showTab(tab) {
   document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("active", x.dataset.tab === tab));
-  for (const id of ["matrix", "health", "radar", "crawlers", "recs", "review", "selectors"]) $("#" + id).hidden = tab !== id;
+  for (const id of TABS) $("#" + id).hidden = tab !== id;
 }
 function gotoCrawler(id) { location.hash = "#/crawlers/" + id; }
 window.addEventListener("hashchange", () => { if (token && me.role !== "BUYER") routeCrawler(); });

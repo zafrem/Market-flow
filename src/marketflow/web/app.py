@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import csv
 import io
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.engine import Engine
 
 from .. import curation, matching
+from ..promotions import add_promotion, list_promotions, remove_promotion
 from ..quality import load_thresholds, quality_report
 from ..snapshot import snapshot as take_snapshot
 from ..db import init_sqlite, make_engine
@@ -57,6 +58,20 @@ class SynonymIn(BaseModel):
 class MatchIn(BaseModel):
     std_item_id: int
     grade: Literal["SAME", "SIMILAR", "SUBSTITUTE"] = "SAME"
+
+
+class PromotionIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    start_date: date
+    end_date: date
+    category_l: str = Field(default="", max_length=50)
+    channel_name: str = Field(default="", max_length=50)
+    discount_pct: float | None = None
+    note: str = Field(default="", max_length=255)
+
+
+def cat_ok(scope, category_l: str) -> bool:
+    return scope is None or any(l == category_l for l, _ in scope)
 
 
 class WatchlistIn(BaseModel):
@@ -383,6 +398,32 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
         repo.audit(admin.email, "MI_IMPORT", None, {"signal_type": signal_type.upper(), "loaded": res.loaded, "errors": len(res.errors), "pii_skipped": res.pii_skipped}, now())
         return {"loaded": res.loaded, "pii_skipped": res.pii_skipped, "classified": res.classified, "unclassified": res.unclassified, "errors": [{"line": e.line, "field": e.field, "message": e.message} for e in res.errors[:50]],
                 "error_count": len(res.errors)}
+
+    @app.get("/promotions")
+    def promotions_list(user: CurrentUser = Depends(require_decider)):
+        today = now().date()
+        return {"today": today.isoformat(), "promotions": [p for p in list_promotions(repo, today) if p["category_l"] == "" or cat_ok(user.scope, p["category_l"])]}
+
+    @app.post("/promotions", status_code=201)
+    def promotions_add(body: PromotionIn, user: CurrentUser = Depends(require_decider)):
+        if body.category_l and not cat_ok(user.scope, body.category_l):
+            raise HTTPException(404, "category not found")
+        if not body.category_l and user.role != "ADMIN":
+            raise HTTPException(403, "only an administrator can record a promotion for every category")
+        try:
+            pid = add_promotion(repo, Actor(user.email, user.role), now(), body.name, body.start_date, body.end_date, body.category_l, body.channel_name,
+                                body.discount_pct, body.note)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        return {"promo_id": pid}
+
+    @app.delete("/promotions/{promo_id}")
+    def promotions_remove(promo_id: int, user: CurrentUser = Depends(require_decider)):
+        row = repo._rows("SELECT category_l FROM promotions WHERE promo_id=:i", i=promo_id)
+        if not row or (row[0]["category_l"] and not cat_ok(user.scope, row[0]["category_l"])) or (not row[0]["category_l"] and user.role != "ADMIN"):
+            raise HTTPException(404, "promotion not found")
+        remove_promotion(repo, Actor(user.email, user.role), now(), promo_id)
+        return {"ok": True}
 
     @app.get("/quality")
     def data_quality(_: CurrentUser = Depends(require_decider)):

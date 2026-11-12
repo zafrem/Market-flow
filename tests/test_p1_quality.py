@@ -108,3 +108,23 @@ def test_api_and_cli(env):
     import io
     out = io.StringIO()
     assert cli.main(["quality"], settings=env.s, tp=env.tp, out=out) == 0 and "unconfirmed=0" in out.getvalue() and "buyer" in out.getvalue()
+
+
+def test_digest_folds_non_red_alerts_into_one_message_and_remembers_each(tmp_path):
+    import asyncio
+    from marketflow.notify import Alert, Notifier
+    from marketflow.db import init_sqlite, make_engine
+    from marketflow.ops_repo import Repo
+    from marketflow.time_provider import FixedTimeProvider
+    from datetime import datetime, timezone
+    e = make_engine(f"sqlite:///{tmp_path / 'd.db'}"); init_sqlite(e)
+    sent = []
+    async def post(url, body):
+        sent.append(body["text"]); return 200
+    tp = FixedTimeProvider(datetime(2026, 11, 3, 1, 0, tzinfo=timezone.utc))
+    n = Notifier("https://hooks.example.com/x", Repo(e), tp, post=post, digest=True)
+    alerts = [Alert("A", "AMBER", "first"), Alert("B", "INFO", "second"), Alert("C", "RED", "urgent")]
+    asyncio.run(n.dispatch(alerts))
+    assert len(sent) == 2 and any("urgent" in m and "first" not in m for m in sent) and any("first" in m and "second" in m for m in sent)
+    asyncio.run(n.dispatch(alerts))                                  # nothing repeats within the dedupe window
+    assert len(sent) == 2

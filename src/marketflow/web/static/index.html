@@ -25,8 +25,9 @@
     </section>
     <section id="app" hidden>
       <div id="summary" class="summary" data-i18n-label="summary" aria-label="Summary"></div>
-      <nav><button data-tab="matrix" class="active"><span data-i18n="tab.matrix">Comparison matrix</span></button><button data-tab="health"><span data-i18n="tab.health">Category health</span></button><button data-tab="radar"><span data-i18n="tab.radar">Trend radar</span></button><button data-tab="gap"><span data-i18n="tab.gap">Search gap</span></button><button data-tab="recs"><span data-i18n="tab.recs">Recommendations</span></button><button data-tab="crawlers" class="decider"><span data-i18n="tab.crawlers">Crawlers</span></button><button data-tab="matches" class="decider"><span data-i18n="tab.matches">Product matches</span></button><button data-tab="review" class="decider"><span data-i18n="tab.review">Review queue</span></button><button data-tab="selectors" class="decider"><span data-i18n="tab.selectors">Selector candidates</span></button></nav>
+      <nav><button data-tab="matrix" class="active"><span data-i18n="tab.matrix">Comparison matrix</span></button><button data-tab="health"><span data-i18n="tab.health">Category health</span></button><button data-tab="radar"><span data-i18n="tab.radar">Trend radar</span></button><button data-tab="gap"><span data-i18n="tab.gap">Search gap</span></button><button data-tab="recs"><span data-i18n="tab.recs">Recommendations</span></button><button data-tab="crawlers" class="decider"><span data-i18n="tab.crawlers">Crawlers</span></button><button data-tab="matches" class="decider"><span data-i18n="tab.matches">Product matches</span></button><button data-tab="promos" class="decider"><span data-i18n="tab.promos">Promotions</span></button><button data-tab="review" class="decider"><span data-i18n="tab.review">Review queue</span></button><button data-tab="selectors" class="decider"><span data-i18n="tab.selectors">Selector candidates</span></button></nav>
       <p id="toast" role="status"></p>
+      <ul id="qstrip" class="qstrip decider" hidden></ul>
       <div id="matrix">
         <div class="toolbar">
           <label class="inline"><input type="checkbox" id="only-watch"> <span data-i18n="watch_only">Watchlist only</span></label>
@@ -73,6 +74,19 @@
       <div id="matches" hidden>
         <p class="hint" data-i18n="matches.hint">Only listings you confirm as the same product drive prices and alerts. Similar and substitute products are recorded but never used.</p>
         <div class="scroll"><table id="matches-table"><thead><tr><th data-i18n="th.platform">Platform</th><th data-i18n="th.code">Listing</th><th data-i18n="th.title">Title</th><th data-i18n="th.item">Item</th><th data-i18n="th.grade">Grade</th><th data-i18n="th.status">Status</th><th></th></tr></thead><tbody></tbody></table></div>
+      </div>
+      <div id="promos" hidden>
+        <p class="hint" data-i18n="promos.hint">Campaigns we or a channel ran. Read a jump in searches or sales against them. They do not change prices.</p>
+        <form id="promo-form" class="promo-form">
+          <label><span data-i18n="promos.name">Name</span><input name="name" type="text" maxlength="120" required></label>
+          <label><span data-i18n="promos.start">Start</span><input name="start_date" type="date" required></label>
+          <label><span data-i18n="promos.end">End</span><input name="end_date" type="date" required></label>
+          <label><span data-i18n="th.category">Category</span><input name="category_l" type="text" maxlength="50"></label>
+          <label><span data-i18n="th.channel">Channel</span><input name="channel_name" type="text" maxlength="50"></label>
+          <label><span data-i18n="promos.discount">Discount %</span><input name="discount_pct" type="number" min="0" max="100" step="0.1"></label>
+          <button type="submit" data-i18n="promos.add">Add promotion</button>
+        </form>
+        <div class="scroll"><table id="promos-table"><thead><tr><th data-i18n="promos.name">Name</th><th data-i18n="th.category">Category</th><th data-i18n="th.channel">Channel</th><th data-i18n="promos.when">Period</th><th data-i18n="promos.timeline">Last 90 days → next 30</th><th data-i18n="th.status">Status</th><th></th></tr></thead><tbody></tbody></table></div>
       </div>
       <div id="review" hidden>
         <div class="scroll"><table id="review-table"><thead><tr><th data-i18n="th.num">#</th><th data-i18n="th.kind">Kind</th><th data-i18n="th.source">Source</th><th data-i18n="th.item">Item</th><th data-i18n="th.reason">Reason</th><th></th></tr></thead><tbody></tbody></table></div>

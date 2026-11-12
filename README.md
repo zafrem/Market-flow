@@ -144,3 +144,11 @@ dedupe and job state live in the database, not Redis.
 ```bash
 cd tests/js && npm install && npm test      # real app.js + index.html in jsdom against a fake API; also run by pytest
 ```
+
+## Solo use, promotions, and the new look
+
+- **Solo mode** (`[approval] solo_mode`, default on): one person may approve their own proposals, including below the margin defense line (still flagged and audited). Set `false` for a team: authors cannot approve their own proposals and below-line changes need an ADMIN.
+- **Promotion calendar**: the Promotions tab records campaigns (name, period, category, channel, discount) so a jump in searches or sales is read against them. Informational only. Existing MySQL databases: apply `db/migrations/005_p1_promotions.sql`.
+- **Daily digest** (`[alerts] digest = true`, opt-in): alerts below RED are sent as one summary per run; RED alerts stay individual.
+- **Data-quality strip** above the comparison matrix: one chip per crawler (fresh, stale, low success) plus counts that need a person.
+- The dashboard has a dark navigation rail and a summary band; numbers use a monospaced face so columns line up.
