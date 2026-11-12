@@ -91,6 +91,8 @@ SQLITE_DDL = [
         metric TEXT NOT NULL, value NUMERIC NOT NULL, source TEXT NOT NULL DEFAULT '',
         UNIQUE (signal_type, period_start, category_l, keyword, metric))""",
     "CREATE INDEX IF NOT EXISTS idx_mi_period ON mi_observations (signal_type, period_start)",
+    """CREATE TABLE IF NOT EXISTS mi_synonyms (
+        alias TEXT PRIMARY KEY, canonical TEXT NOT NULL, updated_by TEXT NOT NULL DEFAULT '', updated_at TEXT)""",
     """CREATE TABLE IF NOT EXISTS crawler_settings (
         crawler_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 1, times TEXT, config TEXT,
         last_slot TEXT, updated_by TEXT, updated_at TEXT)""",

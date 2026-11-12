@@ -25,7 +25,7 @@
     </section>
     <section id="app" hidden>
       <div id="summary" class="summary" data-i18n-label="summary" aria-label="Summary"></div>
-      <nav><button data-tab="matrix" class="active"><span data-i18n="tab.matrix">Comparison matrix</span></button><button data-tab="health"><span data-i18n="tab.health">Category health</span></button><button data-tab="radar"><span data-i18n="tab.radar">Trend radar</span></button><button data-tab="recs"><span data-i18n="tab.recs">Recommendations</span></button><button data-tab="crawlers" class="decider"><span data-i18n="tab.crawlers">Crawlers</span></button><button data-tab="matches" class="decider"><span data-i18n="tab.matches">Product matches</span></button><button data-tab="review" class="decider"><span data-i18n="tab.review">Review queue</span></button><button data-tab="selectors" class="decider"><span data-i18n="tab.selectors">Selector candidates</span></button></nav>
+      <nav><button data-tab="matrix" class="active"><span data-i18n="tab.matrix">Comparison matrix</span></button><button data-tab="health"><span data-i18n="tab.health">Category health</span></button><button data-tab="radar"><span data-i18n="tab.radar">Trend radar</span></button><button data-tab="gap"><span data-i18n="tab.gap">Search gap</span></button><button data-tab="recs"><span data-i18n="tab.recs">Recommendations</span></button><button data-tab="crawlers" class="decider"><span data-i18n="tab.crawlers">Crawlers</span></button><button data-tab="matches" class="decider"><span data-i18n="tab.matches">Product matches</span></button><button data-tab="review" class="decider"><span data-i18n="tab.review">Review queue</span></button><button data-tab="selectors" class="decider"><span data-i18n="tab.selectors">Selector candidates</span></button></nav>
       <p id="toast" role="status"></p>
       <div id="matrix">
         <div class="toolbar">
@@ -54,6 +54,12 @@
           <label class="inline"><input type="checkbox" id="radar-stable"> <span data-i18n="radar.stable">Include flat keywords</span></label></div>
         <div class="scroll"><table id="radar-table"><thead><tr>
           <th data-i18n="th.keyword">Keyword</th><th data-i18n="th.stage">Stage</th><th class="r" data-i18n="th.searches">Searches</th><th data-i18n="th.other">Other signals</th><th class="r" data-i18n="th.score">Score</th><th data-i18n="th.story">What changed · why · what to do</th>
+        </tr></thead><tbody></tbody></table></div>
+      </div>
+      <div id="gap" hidden>
+        <div class="toolbar"><p class="hint" data-i18n="gap.hint">Keywords people search a lot but rarely buy from, with the first cause that applies: no product, out of stock, price disadvantage, otherwise a manual check.</p></div>
+        <div class="scroll"><table id="gap-table"><thead><tr>
+          <th data-i18n="th.keyword">Keyword</th><th class="r" data-i18n="th.searches">Searches</th><th class="r" data-i18n="th.conversion">Conversion</th><th data-i18n="th.cause">Cause</th><th data-i18n="th.story">What changed · why · what to do</th>
         </tr></thead><tbody></tbody></table></div>
       </div>
       <div id="crawlers" hidden>

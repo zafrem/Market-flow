@@ -121,7 +121,7 @@ $("#login-form").addEventListener("submit", async (ev) => {
 
 document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => {
   document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("active", x === b));
-  for (const id of ["matrix", "health", "radar", "crawlers", "recs", "matches", "review", "selectors"]) $("#" + id).hidden = b.dataset.tab !== id;
+  for (const id of ["matrix", "health", "radar", "gap", "crawlers", "recs", "matches", "review", "selectors"]) $("#" + id).hidden = b.dataset.tab !== id;
   if (b.dataset.tab === "crawlers" && crawlerId) history.replaceState(null, "", "#/crawlers/" + crawlerId);
 }));
 $("#only-watch").addEventListener("change", loadMatrix);
@@ -294,16 +294,29 @@ function renderRadar(rows) {
     const tr = el("tr"), name = el("td"), sig = Object.entries(r.signals).filter(([, v]) => v > 0).map(([k, v]) => t("signal." + k) + " " + v);
     name.append(el("span", r.keyword, "item"), el("small", r.category || t("no_category")));
     const last = r.search_series[r.search_series.length - 1];
-    tr.append(name, el("td", t("stage." + r.stage), "stage"),
-      trendCell(compact(last[1]), r.search_series, "c-margin", r.keyword + " " + t("searches"), (v) => compact(v), t("vs_earlier", { pct: pctText(r.growth) })),
+    const searches = trendCell(compact(last[1]), r.search_series, "c-margin", r.keyword + " " + t("searches"), (v) => compact(v), t("vs_earlier", { pct: pctText(r.growth) }));
+    if (r.wow != null || r.yoy != null) searches.append(el("small", [r.wow != null ? t("wow", { pct: pctText(r.wow) }) : "", r.yoy != null ? t("yoy", { pct: pctText(r.yoy) }) : ""].filter(Boolean).join(" · "), "pop"));
+    tr.append(name, el("td", t("stage." + r.stage), "stage"), searches,
       el("td", sig.length ? sig.join(" · ") : t("none_yet")), el("td", r.stage === "FADING" || r.stage === "STABLE" ? "–" : r.score, "num"), story(r));
     body.append(tr);
   }
 }
 
+function renderGap(rows) {
+  const body = $("#gap-table tbody"); body.replaceChildren();
+  if (!rows.length) return emptyRow(body, 5, t("empty.gap"));
+  for (const g of rows) {
+    const name = el("td"); name.append(el("span", g.keyword, "item"), el("small", g.category || t("no_category")));
+    const cause = el("td"); cause.append(el("span", t("cause." + g.primary_cause), "pill " + (g.primary_cause === "OTHER" ? "" : "amber")));
+    for (const c of g.contributing_causes) cause.append(el("small", "+ " + t("cause." + c)));
+    const tr_ = el("tr"); tr_.append(name, el("td", compact(g.searches), "num"), el("td", (g.conversion * 100).toFixed(1) + "%", "num"), cause, story(g));
+    body.append(tr_);
+  }
+}
+
 async function loadMi() {
   miReport = await api("/mi/report?lang=" + lang + ($("#radar-stable").checked ? "&include_stable=true" : ""));
-  renderHealth(miReport.health); renderRadar(miReport.radar);
+  renderHealth(miReport.health); renderRadar(miReport.radar); renderGap(miReport.gap || []);
   setBadge("radar", miReport.radar.filter((r) => ["SEED", "EMERGING"].includes(r.stage)).length);
 }
 

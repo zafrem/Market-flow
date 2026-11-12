@@ -24,6 +24,11 @@ class MiConfig:
     tight_days: float = 3.0            # stock cover below this = TIGHT, above surplus_days = SURPLUS
     surplus_days: float = 14.0
     interest_metric: str = "searches"
+    gap_top_volume: float = 0.7        # search-sales gap: keywords at/above this volume percentile within their category ...
+    gap_low_conversion: float = 0.3    # ... and at/below this conversion percentile (buyers per search) are examined
+    gap_min_keywords: int = 5          # percentiles need at least this many keywords with both numbers
+    gap_stockout_ratio: float = 0.3    # share of days in the period with zero stock that counts as "out of stock"
+    gap_price_gap_pct: float = 5.0     # our unit price this far above the lowest confirmed competitor = price disadvantage
     demand_metrics: tuple[str, ...] = ("gmv", "unitsold")
     weights: Mapping[str, float] = field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
 
@@ -32,11 +37,12 @@ def load_mi_config(raw: Mapping[str, Any] | None) -> MiConfig:
     raw = dict(raw or {})
     base = MiConfig()
     kw: dict[str, Any] = {}
-    for f in ("history_periods", "min_periods", "recent_periods", "lag_max", "lead_min_points"):
+    for f in ("history_periods", "min_periods", "recent_periods", "lag_max", "lead_min_points", "gap_min_keywords"):
         if f in raw:
             kw[f] = int(raw[f])
     for f in ("health_threshold", "rising_threshold", "growing_level", "mainstream_level", "mention_saturation",
-              "lead_min_r", "tight_days", "surplus_days"):
+              "lead_min_r", "tight_days", "surplus_days",
+              "gap_top_volume", "gap_low_conversion", "gap_stockout_ratio", "gap_price_gap_pct"):
         if f in raw:
             kw[f] = float(raw[f])
     if "interest_metric" in raw:

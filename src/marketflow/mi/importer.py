@@ -12,7 +12,11 @@ from pathlib import Path
 from typing import Any
 
 from ..erp import ImportResult, RowError, _norm, read_table
+from dataclasses import dataclass
+
+from .classify import Classifier
 from .config import SIGNAL_TYPES
+from .privacy import contains_pii
 from .store import MiStore
 
 PERIOD_COLS = {"period", "periodstart", "week", "date", "month", "yyyymm", "yyyymmdd", "기간", "주차", "일자", "월", "날짜"}
@@ -55,13 +59,20 @@ def _metric_name(h: Any) -> str:
     return re.sub(r"[^0-9a-z가-힣]+", "_", str(h).strip().lower()).strip("_")[:MAX_METRIC_LEN]
 
 
-def import_signals(path: str | Path, store: MiStore, signal_type: str, source: str = "") -> ImportResult:
+@dataclass
+class MiImportResult(ImportResult):
+    pii_skipped: int = 0          # rows dropped because a keyword or category looked like personal data (never stored)
+    classified: int = 0           # rows that arrived without a category and got one from the classifier
+    unclassified: int = 0         # keyword rows left without a category (admin-only until someone labels them)
+
+
+def import_signals(path: str | Path, store: MiStore, signal_type: str, source: str = "") -> MiImportResult:
     signal_type = signal_type.upper()
     if signal_type not in SIGNAL_TYPES:
         raise ValueError(f"unknown signal type {signal_type!r}; use one of {', '.join(SIGNAL_TYPES)}")
     path = Path(path)
     header, rows = read_table(path)
-    res = ImportResult()
+    res = MiImportResult()
     cols = {i: _norm(h) for i, h in enumerate(header)}
     period_i = next((i for i, n in cols.items() if n in PERIOD_COLS), None)
     if period_i is None:
@@ -74,6 +85,7 @@ def import_signals(path: str | Path, store: MiStore, signal_type: str, source: s
         res.errors.append(RowError(1, "metrics", "no metric columns (every column besides period/category/keyword is a metric)"))
         return res
     batch: dict[tuple, dict[str, Any]] = {}
+    classifier = Classifier(*store.classifier_knowledge()) if kw_i is not None else None
     for line, cells in rows:
         cells = list(cells) + [None] * (len(header) - len(cells))
         try:
@@ -83,6 +95,15 @@ def import_signals(path: str | Path, store: MiStore, signal_type: str, source: s
             continue
         cat = str(cells[cat_i] or "").strip()[:MAX_TEXT_LEN] if cat_i is not None else ""
         kw = str(cells[kw_i] or "").strip()[:MAX_TEXT_LEN] if kw_i is not None else ""
+        if contains_pii(kw) or contains_pii(cat):
+            res.pii_skipped += 1                              # privacy: drop the whole row, keep nothing of it
+            continue
+        if kw and not cat and classifier is not None:
+            guessed = classifier.category_for(kw)
+            if guessed:
+                cat, res.classified = guessed, res.classified + 1
+            else:
+                res.unclassified += 1
         for i, metric in metric_cols.items():
             try:
                 value = parse_number(cells[i])

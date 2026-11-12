@@ -43,7 +43,9 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
     for name in ("approve", "reject", "apply", "revert"):
         p = sub.add_parser(name); p.add_argument("rec_id", type=int); p.add_argument("--as", dest="actor", required=True, metavar="NAME:ROLE")
     p = sub.add_parser("export-prices"); p.add_argument("--since"); p.add_argument("--file")
-    p = sub.add_parser("import-mi"); p.add_argument("file"); p.add_argument("--type", required=True); p.add_argument("--source", default="")
+    p = sub.add_parser("import-mi"); p.add_argument("--errors-file", help="write every rejected cell with its reason to this CSV"); p.add_argument("file"); p.add_argument("--type", required=True); p.add_argument("--source", default="")
+    p = sub.add_parser("synonym"); p.add_argument("alias"); p.add_argument("canonical", nargs="?"); p.add_argument("--remove", action="store_true")
+    sub.add_parser("synonyms"); sub.add_parser("classify-eval")
     p = sub.add_parser("mi-report"); p.add_argument("--stable", action="store_true"); p.add_argument("--lang", choices=["en", "ko"], default="en")
     sub.add_parser("crawlers")
     p = sub.add_parser("crawler-run"); p.add_argument("crawler_id")
@@ -176,10 +178,36 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
         except ValueError as e:
             print(f"refused: {e}", file=out)
             return 2
-        print(f"loaded={res.loaded} errors={len(res.errors)}", file=out)
+        print(f"loaded={res.loaded} errors={len(res.errors)} pii_skipped={res.pii_skipped} classified={res.classified} unclassified={res.unclassified}", file=out)
         for e in res.errors[:50]:
             print(f"  line {e.line} [{e.field}] {e.message}", file=out)
+        if a.errors_file and res.errors:
+            import csv as _csv
+            with open(a.errors_file, "w", newline="", encoding="utf-8-sig") as fh:
+                w = _csv.writer(fh); w.writerow(["line", "field", "reason"])
+                w.writerows((e.line, e.field, e.message) for e in res.errors)
+            print(f"rejected cells written to {a.errors_file}", file=out)
         return 1 if res.errors and res.loaded == 0 else 0
+    if a.cmd in {"synonym", "synonyms", "classify-eval"}:
+        from .mi.classify import evaluate
+        from .mi.store import MiStore
+        ms = MiStore(engine)
+        if a.cmd == "synonyms":
+            for s in ms.list_synonyms():
+                print(f"{s['alias']} -> {s['canonical']}  (affects {ms.synonym_impact(s['alias'])} keyword series)", file=out)
+        elif a.cmd == "classify-eval":
+            print(evaluate(*ms.classifier_knowledge()), file=out)
+        elif a.remove:
+            print("removed" if ms.remove_synonym(a.alias) else "refused: no such synonym", file=out)
+        else:
+            if not a.canonical:
+                print("refused: give the canonical keyword", file=out); return 2
+            try:
+                ms.set_synonym(a.alias, a.canonical, "cli", tp.now().replace(tzinfo=None))
+            except ValueError as e:
+                print(f"refused: {e}", file=out); return 2
+            print(f"{a.alias} -> {a.canonical}  (affects {ms.synonym_impact(a.alias)} keyword series)", file=out)
+        return 0
     if a.cmd == "mi-report":
         from .mi.service import mi_report
         from .mi.store import MiStore

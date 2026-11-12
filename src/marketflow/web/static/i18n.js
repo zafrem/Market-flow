@@ -6,7 +6,10 @@ const MSG = {
   en: {
     "summary": "Summary", "login.email": "Email", "login.password": "Password", "login.submit": "Sign in", "signout": "Sign out", "lang.switch": "한국어",
     "tab.matrix": "Comparison matrix", "tab.health": "Category health", "tab.radar": "Trend radar", "tab.recs": "Recommendations",
-    "tab.review": "Review queue", "tab.selectors": "Selector candidates", "tab.matches": "Product matches",
+    "tab.review": "Review queue", "tab.selectors": "Selector candidates", "tab.matches": "Product matches", "tab.gap": "Search gap", "th.conversion": "Conversion", "th.cause": "Cause", "wow": "{pct} vs last period", "yoy": "{pct} vs last year",
+    "gap.hint": "Keywords people search a lot but rarely buy from, with the first cause that applies: no product, out of stock, price disadvantage, otherwise a manual check.",
+    "empty.gap": "No search-to-purchase gaps found. Import search reports with a buyers column to see them.",
+    "cause.NO_PRODUCT": "No product", "cause.OUT_OF_STOCK": "Out of stock", "cause.PRICE_DISADVANTAGE": "Price disadvantage", "cause.OTHER": "Other",
     "export_matrix": "Export comparison (CSV)", "th.if_matched": "If we match", "th.if_matched_sub": "margin · break-even units/week",
     "th.code": "Listing", "th.grade": "Grade", "unconfirmed": "{n} not confirmed", "below_floor": "below floor",
     "bep.ok": "break-even {n}/wk", "bep.no_cut": "not a cut", "bep.unachievable": "no margin at that price", "bep.none": "no margin today",
@@ -85,7 +88,10 @@ const MSG = {
   ko: {
     "summary": "요약", "login.email": "이메일", "login.password": "비밀번호", "login.submit": "로그인", "signout": "로그아웃", "lang.switch": "English",
     "tab.matrix": "비교 매트릭스", "tab.health": "카테고리 헬스", "tab.radar": "트렌드 레이더", "tab.recs": "가격 추천",
-    "tab.review": "검토 큐", "tab.selectors": "셀렉터 후보", "tab.matches": "상품 매칭",
+    "tab.review": "검토 큐", "tab.selectors": "셀렉터 후보", "tab.matches": "상품 매칭", "tab.gap": "검색-구매 간극", "th.conversion": "전환율", "th.cause": "원인", "wow": "직전 기간 대비 {pct}", "yoy": "전년 동기 대비 {pct}",
+    "gap.hint": "검색은 많은데 구매로 이어지지 않는 키워드와, 처음 해당하는 원인(상품 없음, 품절, 가격 열위, 그 외는 직접 확인)입니다.",
+    "empty.gap": "검색-구매 간극이 발견되지 않았습니다. buyers 열이 있는 검색 리포트를 가져오면 나타납니다.",
+    "cause.NO_PRODUCT": "상품 없음", "cause.OUT_OF_STOCK": "품절", "cause.PRICE_DISADVANTAGE": "가격 열위", "cause.OTHER": "기타",
     "export_matrix": "비교표 내보내기 (CSV)", "th.if_matched": "가격을 맞추면", "th.if_matched_sub": "마진 · 주간 손익분기 수량",
     "th.code": "리스팅", "th.grade": "등급", "unconfirmed": "미확정 {n}건", "below_floor": "방어선 미만",
     "bep.ok": "손익분기 주 {n}개", "bep.no_cut": "인하 아님", "bep.unachievable": "그 가격에서는 마진 없음", "bep.none": "현재 마진 없음",

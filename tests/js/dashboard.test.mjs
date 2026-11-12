@@ -494,3 +494,25 @@ test("product matches: list, confirm with a grade, remove", async () => {
   assert.match(text(t.d.querySelector('nav button[data-tab="matches"]')), /상품 매칭/);
   assert.match(text(t.d.querySelector("#matches-table tbody")), /검토 필요/);
 });
+
+// ---- P1: search gap tab, period-over-period change ---------------------------------------------------------------------
+const GAP = { keyword: "사과 세트", category: "Fresh", searches: 9000, buyers: 90, conversion: 0.01, primary_cause: "OUT_OF_STOCK", contributing_causes: ["PRICE_DISADVANTAGE"],
+  changed: "9,000 searches but only 1.0% buy", why: "Out of stock on 100% of days. Also contributing: price disadvantage.", action: "Restore supply." };
+const RADAR_ROW = { keyword: "grower", category: "Fresh", stage: "GROWING", growth: 0.3, volume_percentile: 0.9, score: 40, opportunity: 4, signals: { product: 0, promotion: 0, media: 0 },
+  search_series: [["2026-10-12", 100], ["2026-10-19", 130], ["2026-10-26", 160]], corroborating: [], changed: "c", why: "w", action: "a", wow: 0.2308, yoy: 1.0 };
+
+test("search gap tab lists the cause and the contributing causes; radar shows WoW and YoY", async () => {
+  const t = boot({ routes: { "GET /mi/report": () => [200, { health: [], radar: [RADAR_ROW], gap: [GAP], as_of: "2026-10-26", signals: ["SEARCH"] }] } }); await t.login();
+  const row = t.d.querySelector("#gap-table tbody tr");
+  assert.match(text(row), /사과 세트/); assert.match(text(row), /Out of stock/); assert.match(text(row), /\+ Price disadvantage/); assert.match(text(row), /1\.0%/);
+  assert.match(text(t.d.querySelector("#radar-table tbody tr")), /\+23% vs last period · \+100% vs last year/);
+  await t.click(t.d.querySelector('nav button[data-tab="gap"]'));
+  assert.equal(t.d.querySelector("#gap").hidden, false); assert.equal(t.d.querySelector("#radar").hidden, true);
+  await t.click(t.d.querySelector("#lang"));
+  assert.match(text(t.d.querySelector("#gap-table tbody tr")), /품절/); assert.match(text(t.d.querySelector('nav button[data-tab="gap"]')), /검색-구매 간극/);
+});
+
+test("search gap tab explains itself when empty", async () => {
+  const t = boot(); await t.login();
+  assert.match(text(t.d.querySelector("#gap-table tbody")), /No search-to-purchase gaps/);
+});

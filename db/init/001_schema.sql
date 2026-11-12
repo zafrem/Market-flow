@@ -269,6 +269,13 @@ CREATE TABLE IF NOT EXISTS mi_observations (
   KEY idx_mi_period (signal_type, period_start)
 );
 
+CREATE TABLE IF NOT EXISTS mi_synonyms (
+  alias VARCHAR(100) NOT NULL PRIMARY KEY,
+  canonical VARCHAR(100) NOT NULL,
+  updated_by VARCHAR(100) NOT NULL DEFAULT '',
+  updated_at DATETIME NULL
+);
+
 CREATE TABLE IF NOT EXISTS crawler_settings (
   crawler_id VARCHAR(40) PRIMARY KEY,
   enabled TINYINT(1) NOT NULL DEFAULT 1,

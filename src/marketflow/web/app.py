@@ -20,6 +20,7 @@ from ..decision import service
 from ..decision.service import Actor, WorkflowError
 from ..crawlers.adapters import InboxCrawler
 from ..crawlers.service import CrawlerService
+from ..mi.classify import evaluate as classify_eval
 from ..mi.importer import import_signals
 from ..mi.service import mi_report
 from ..mi.store import MiStore
@@ -38,6 +39,10 @@ Role = Literal["ADMIN", "MD", "BUYER"]
 class LoginIn(BaseModel):
     email: str = Field(max_length=255)
     password: str = Field(max_length=256)
+
+
+class SynonymIn(BaseModel):
+    canonical: str = Field(min_length=1, max_length=100)
 
 
 class MatchIn(BaseModel):
@@ -315,7 +320,7 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
     @app.get("/mi/report")
     def mi(include_stable: bool = False, lang: Literal["en", "ko"] = "en", user: CurrentUser = Depends(current_user)):
         allowed = None if user.scope is None else {l for l, _ in user.scope}
-        return mi_report(mi_store, settings, allowed, include_stable, lang)
+        return mi_report(mi_store, settings, allowed, include_stable, lang, now())
 
     @app.post("/mi/import")
     async def mi_import(request: Request, signal_type: str, source: str = "", admin: CurrentUser = Depends(require_admin)):
@@ -336,9 +341,40 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
                 res = import_signals(f, mi_store, signal_type, source)
             except ValueError as e:
                 raise HTTPException(422, str(e)) from e
-        repo.audit(admin.email, "MI_IMPORT", None, {"signal_type": signal_type.upper(), "loaded": res.loaded, "errors": len(res.errors)}, now())
-        return {"loaded": res.loaded, "errors": [{"line": e.line, "field": e.field, "message": e.message} for e in res.errors[:50]],
+        repo.audit(admin.email, "MI_IMPORT", None, {"signal_type": signal_type.upper(), "loaded": res.loaded, "errors": len(res.errors), "pii_skipped": res.pii_skipped}, now())
+        return {"loaded": res.loaded, "pii_skipped": res.pii_skipped, "classified": res.classified, "unclassified": res.unclassified, "errors": [{"line": e.line, "field": e.field, "message": e.message} for e in res.errors[:50]],
                 "error_count": len(res.errors)}
+
+    # ---- keyword dictionary: synonyms (admin edits, MD/ADMIN read) and the category classifier -------------------------------
+    @app.get("/mi/synonyms")
+    def synonyms(_: CurrentUser = Depends(require_decider)):
+        return {"synonyms": [{**s, "updated_at": str(s["updated_at"]) if s["updated_at"] else None, "affected_keywords": mi_store.synonym_impact(s["alias"])}
+                             for s in mi_store.list_synonyms()]}
+
+    @app.put("/mi/synonyms/{alias}")
+    def put_synonym(alias: str, body: SynonymIn, admin: CurrentUser = Depends(require_admin)):
+        """Takes effect in the next report/batch; the response says how many stored keyword series it folds."""
+        before = mi_store.synonyms().get(alias.strip().lower())
+        try:
+            mi_store.set_synonym(alias, body.canonical, admin.email, now())
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from e
+        impact = mi_store.synonym_impact(alias)
+        repo.audit(admin.email, "SYNONYM_SET", {"alias": alias, "canonical": before}, {"alias": alias, "canonical": body.canonical, "affected_keywords": impact}, now())
+        return {"alias": alias, "canonical": body.canonical, "affected_keywords": impact}
+
+    @app.delete("/mi/synonyms/{alias}")
+    def delete_synonym(alias: str, admin: CurrentUser = Depends(require_admin)):
+        before = mi_store.synonyms().get(alias.strip().lower())
+        if before is None or not mi_store.remove_synonym(alias):
+            raise HTTPException(404, "synonym not found")
+        repo.audit(admin.email, "SYNONYM_REMOVED", {"alias": alias, "canonical": before}, None, now())
+        return {"alias": alias, "removed": True}
+
+    @app.get("/mi/classifier")
+    def classifier_quality(_: CurrentUser = Depends(require_admin)):
+        """How well keyword -> category guessing does on keywords that already have a category (leave-one-out)."""
+        return classify_eval(*mi_store.classifier_knowledge())
 
     # ---- crawlers: one per data item, each with its own settings, schedule and run history --------------------------------
     def crawler_or_404(cid: str):
