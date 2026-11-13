@@ -211,9 +211,9 @@ $("#export-matrix").addEventListener("click", () => downloadFile("/matrix/export
 async function loadQuality() {
   const q = await api("/quality"), strip = $("#qstrip"), chips = [];
   for (const c of q.crawlers.filter((x) => x.enabled && x.configured)) {
-    const state = c.stale ? "stale" : (c.success_rate !== null && c.success_rate < 0.95) ? "low" : "ok";
+    const state = c.stale ? "stale" : c.never_run ? "never" : (c.success_rate !== null && c.success_rate < 0.95) ? "low" : "ok";
     const li = el("li", "", state === "ok" ? "" : state);
-    li.append(el("span", crawlerTitle(c.id)), el("small", state === "ok" ? (c.last_success_hours === null ? t("q.ok") : t("q.fresh_age", { h: c.last_success_hours })) : t("q." + state)));
+    li.append(el("span", crawlerTitle(c.id)), el("small", state === "never" ? t("q.never") : state === "ok" ? (c.last_success_hours === null ? t("q.ok") : t("q.fresh_age", { h: c.last_success_hours })) : t("q." + state)));
     chips.push(li);
   }
   for (const [n, key] of [[q.unconfirmed_matches, "q.unconfirmed"], [q.matches_to_recheck, "q.recheck"], [q.unparseable_titles, "q.unparsed"]]) {

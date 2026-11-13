@@ -197,7 +197,7 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
         rep = quality_report(repo, CrawlerService(engine, settings, tp), load_thresholds(settings.quality), tp.now().replace(tzinfo=None))
         for c_ in rep["crawlers"]:
             rate = "n/a" if c_["success_rate"] is None else f"{c_['success_rate'] * 100:.0f}%"
-            print(f"{c_['id']:<17} success {rate:<5} ok={c_['ok']} failed={c_['failed']}{'  STALE' if c_['stale'] else ''}", file=out)
+            print(f"{c_['id']:<17} success {rate:<5} ok={c_['ok']} failed={c_['failed']}{'  STALE' if c_['stale'] else '  NEVER_RUN' if c_.get('never_run') else ''}", file=out)
         print(f"unparseable={rep['unparseable_titles']} unmapped={rep['unmapped_items']} unconfirmed={rep['unconfirmed_matches']} to_recheck={rep['matches_to_recheck']}", file=out)
         for i in rep["issues"]:
             print(f"ISSUE {i['code']} {i['subject']}", file=out)

@@ -545,13 +545,14 @@ test("BUYER cannot propose prices", async () => {
 test("quality strip shows a chip per crawler and what needs a person; stale ones are marked", async () => {
   const q = { crawlers: [{ id: "news", enabled: true, configured: true, success_rate: 1, last_success_hours: 3, stale: false },
                          { id: "buyer", enabled: true, configured: true, success_rate: 0.5, last_success_hours: 80, stale: true },
-                         { id: "flyer", enabled: false, configured: true, success_rate: null, last_success_hours: null, stale: false }],
+                         { id: "flyer", enabled: false, configured: true, success_rate: null, last_success_hours: null, stale: false },
+                         { id: "report", enabled: true, configured: true, success_rate: null, last_success_hours: null, stale: false, never_run: true }],
               unparseable_titles: 0, unmapped_items: 0, unconfirmed_matches: 4, matches_to_recheck: 0, issues: [] };
   const t = boot({ routes: { "GET /quality": () => [200, q] } }); await t.login();
   const chips = [...t.d.querySelectorAll("#qstrip li")];
   assert.equal(t.d.querySelector("#qstrip").hidden, false);
-  assert.equal(chips.length, 3);                                                   // news, buyer, and the unconfirmed count (flyer is disabled)
-  assert.ok(chips[1].classList.contains("stale")); assert.match(text(chips[2]), /4/);
+  assert.equal(chips.length, 4);                                                   // news, buyer, report (never run), and the unconfirmed count (flyer is disabled)
+  assert.ok(chips[1].classList.contains("stale")); assert.match(text(chips[2]), /Not run yet/); assert.ok(!chips[2].classList.contains("stale")); assert.match(text(chips[3]), /4/);
 });
 
 test("BUYER never loads quality or promotions", async () => {

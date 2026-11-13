@@ -128,3 +128,8 @@ def test_digest_folds_non_red_alerts_into_one_message_and_remembers_each(tmp_pat
     assert len(sent) == 2 and any("urgent" in m and "first" not in m for m in sent) and any("first" in m and "second" in m for m in sent)
     asyncio.run(n.dispatch(alerts))                                  # nothing repeats within the dedupe window
     assert len(sent) == 2
+
+
+def test_a_crawler_that_never_ran_is_reported_as_never_run_not_stale(env):
+    by = {c["id"]: c for c in quality_report(Repo(env.e), env.svc, load_thresholds({}), NOW)["crawlers"]}
+    assert by["report"]["never_run"] is True and by["report"]["stale"] is False

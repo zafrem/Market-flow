@@ -62,13 +62,13 @@ def quality_report(repo: Repo, crawlers: CrawlerService, th: QualityThresholds, 
         cyc = cycle_hours(eff["times"])
         configured = eff["enabled"] and not c.not_configured(eff["config"])
         age = None if last is None else (now - last).total_seconds() / 3600
-        stale = bool(configured and (last is None or age > 2 * cyc))
+        stale = bool(configured and last is not None and age > 2 * cyc)      # a crawler that never ran is "never run", not stale
         out_crawlers.append({"id": c.id, "enabled": eff["enabled"], "configured": not c.not_configured(eff["config"]), "ok": ok, "failed": failed,
                              "success_rate": None if rate is None else round(rate, 3), "last_success_hours": None if age is None else round(age, 1),
-                             "cycle_hours": round(cyc, 1), "stale": stale})
+                             "cycle_hours": round(cyc, 1), "stale": stale, "never_run": bool(configured and last is None)})
         if configured and rate is not None and rate < th.min_success_rate:
             issues.append({"code": "LOW_SUCCESS_RATE", "subject": c.id})
-        if stale and last is not None:
+        if stale:
             issues.append({"code": "STALE_DATA", "subject": c.id})
     review = {r["kind"]: int(r["n"]) for r in repo._rows("SELECT kind, COUNT(*) AS n FROM review_queue WHERE status='OPEN' GROUP BY kind")}
     unconfirmed = int(repo._rows("SELECT COUNT(*) AS n FROM product_channel_map WHERE reviewed_at IS NULL")[0]["n"])
