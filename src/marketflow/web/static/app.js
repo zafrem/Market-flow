@@ -93,8 +93,8 @@ function renderWho() {
   const out = el("button", t("signout")); out.onclick = signOut;
   $("#who").replaceChildren(document.createTextNode(me.name + " · " + me.role + "  "), out);
 }
-const TABS = ["matrix", "health", "radar", "gap", "crawlers", "recs", "matches", "promos", "flyers", "insights", "review", "selectors"];
-const reloadAll = () => Promise.all([loadMatrix(), loadMi(), loadRecs(), ...(me.role === "BUYER" ? [] : [loadQuality(), loadPromos(), loadInsights(), loadFlyers(), loadMatches(), loadReview(), loadSelectors(), loadCrawlers()])]);
+const TABS = ["matrix", "health", "radar", "gap", "crawlers", "recs", "matches", "promos", "flyers", "insights", "review", "selectors", "settings"];
+const reloadAll = () => Promise.all([loadMatrix(), loadMi(), loadRecs(), ...(me.role === "BUYER" ? [] : [loadQuality(), loadPromos(), loadInsights(), loadFlyers(), loadMatches(), loadReview(), loadSelectors(), loadCrawlers(), loadSettings()])]);
 function setLang(l) {
   lang = l;
   try { localStorage.setItem("mf-lang", l); } catch (e) { /* storage blocked: the choice lasts until reload */ }
@@ -113,6 +113,7 @@ $("#login-form").addEventListener("submit", async (ev) => {
     $("#login").hidden = true; $("#app").hidden = false;
     renderWho();
     document.querySelectorAll(".cost, .decider").forEach((c) => c.hidden = me.role === "BUYER");
+    document.querySelectorAll(".admin-only").forEach((c) => c.hidden = !isAdmin());
     toast("");
     watch = new Set((await api("/watchlist")).std_item_ids);
     await reloadAll();
@@ -297,6 +298,72 @@ async function loadInsights() {
 
 // ---- promotion calendar -------------------------------------------------------------------------------------------
 const PROMO_BEFORE = 90, PROMO_AFTER = 30;
+// ---- settings (ADMIN): users and data ----------------------------------------------------------------------------------
+const parseCats = (s) => s.split(",").map((x) => x.trim()).filter(Boolean).map((x) => { const [l, m = ""] = x.split("/").map((y) => y.trim()); return { category_l: l, category_m: m }; });
+let demoPoll = null, demoWatching = false;
+async function loadSettings() {
+  if (!isAdmin()) return;
+  await Promise.all([loadUsers(), loadSystem()]);
+}
+async function loadUsers() {
+  const { users } = await api("/admin/users");
+  const body = $("#users-table tbody"); body.replaceChildren();
+  for (const u of users) {
+    const self = me && u.email === me.email, tr = el("tr");
+    const role = el("select"); for (const r of ["ADMIN", "MD", "BUYER"]) { const o = el("option", r); o.selected = r === u.role; role.append(o); }
+    const active = el("input"); active.type = "checkbox"; active.checked = !!u.active;
+    role.disabled = active.disabled = self;                              // the server refuses self-demotion anyway; say so up front
+    const patch = async (change) => { try { await api("/admin/users/" + u.user_id, { method: "PATCH", body: JSON.stringify(change) }); toast(t("set.saved")); } catch (e) { toast(e.message); await loadUsers(); } };
+    role.onchange = () => patch({ role: role.value }); active.onchange = () => patch({ active: active.checked });
+    const cats = el("input"); cats.type = "text"; cats.value = u.categories.join(", "); cats.maxLength = 200;
+    const save = el("button", t("set.save"));
+    save.onclick = async () => { try { await api("/admin/users/" + u.user_id + "/assignments", { method: "PUT", body: JSON.stringify(parseCats(cats.value)) }); toast(t("set.saved")); } catch (e) { toast(e.message); } };
+    const who = el("td", u.email); if (self) who.append(" ", el("small", "(" + t("set.you") + ")"));
+    const c1 = el("td"), c2 = el("td"), c3 = el("td"), c4 = el("td"); c1.append(role); c2.append(active); c3.append(cats); c4.append(save);
+    tr.append(who, el("td", u.name), c1, c2, c3, c4); body.append(tr);
+  }
+}
+$("#user-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const f = Object.fromEntries(new FormData(ev.target).entries());
+  try {
+    const { user_id } = await api("/admin/users", { method: "POST", body: JSON.stringify({ email: f.email, name: f.name, role: f.role, password: f.password }) });
+    if (f.categories.trim()) await api("/admin/users/" + user_id + "/assignments", { method: "PUT", body: JSON.stringify(parseCats(f.categories)) });
+    ev.target.reset(); toast(t("set.user_added")); await loadUsers();
+  } catch (e) { toast(e.message); }
+});
+const COUNT_KEYS = ["ext_public_benchmarks", "ext_retail_prices", "int_operations_inventory", "price_recommendations", "promotions", "mi_observations", "product_channel_map", "users", "master_products"];
+async function loadSystem() {
+  const s = await api("/admin/system"), running = s.job.state === "RUNNING";
+  $("#data-hint").textContent = t(s.local ? "set.hint.local" : "set.hint.remote", { store: s.store });
+  const box = $("#data-status"); box.replaceChildren();
+  if (s.counts) {
+    const hasData = ["ext_public_benchmarks", "ext_retail_prices", "int_operations_inventory", "price_recommendations", "promotions", "mi_observations"].some((k) => s.counts[k] > 0);
+    for (const k of COUNT_KEYS) { const c = el("span", t("cnt." + k), "chip"); c.append(el("b", String(s.counts[k]))); box.append(c); }
+    if (!hasData) box.append(el("span", t("cnt.empty"), "chip"));
+    $("#demo-load").disabled = !s.local || hasData; $("#demo-load").title = hasData ? t("set.demo.has_data") : "";
+  } else { box.append(el("span", t("set.demo.running"), "chip")); $("#demo-load").disabled = true; }
+  $("#data-clear").disabled = !s.local || running;
+  clearTimeout(demoPoll);
+  if (running) { demoWatching = true; demoPoll = setTimeout(() => loadSystem().catch(() => {}), 3000); return; }
+  if (!demoWatching) return;                                           // report a finished job once, not on every reload
+  demoWatching = false;
+  if (s.job.state === "DONE") { toast(t("set.demo.done")); await reloadAll(); }
+  else if (s.job.state === "FAILED") toast(t("set.demo.failed", { msg: s.job.message }));
+}
+$("#demo-load").addEventListener("click", async () => {
+  try { await api("/admin/demo", { method: "POST" }); toast(""); await loadSystem(); } catch (e) { toast(e.message); }
+});
+$("#data-clear").addEventListener("click", () => { $("#clear-form").hidden = false; $("#clear-form").elements.confirm.focus(); });
+$("#clear-cancel").addEventListener("click", () => { $("#clear-form").hidden = true; $("#clear-form").reset(); });
+$("#clear-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  try {
+    await api("/admin/clear", { method: "POST", body: JSON.stringify({ confirm: new FormData(ev.target).get("confirm") }) });
+    ev.target.reset(); ev.target.hidden = true; toast(t("set.cleared")); await reloadAll();
+  } catch (e) { toast(e.message); }
+});
+
 async function loadPromos() {
   const { today, promotions } = await api("/promotions");
   const t0 = Date.parse(today + "T00:00:00Z"), from = t0 - PROMO_BEFORE * DAY_MS, span = (PROMO_BEFORE + PROMO_AFTER) * DAY_MS;

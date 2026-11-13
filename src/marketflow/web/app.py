@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import io
+import threading
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -15,7 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.engine import Engine
 
 from .. import curation, matching
-from .. import flyers
+from .. import demo, flyers
 from ..crawlers.service import resolve_inbox
 from ..vision import image_mime
 from ..insights import elasticity_basis, load_insight_config, new_products, project_scenarios, prolonged_discounts, promotion_results
@@ -98,6 +99,10 @@ class WatchlistIn(BaseModel):
 class PrefsIn(BaseModel):
     alert_margin_bep: Decimal = Field(ge=0, le=100)
     ui_layout: dict[str, Any] = Field(default_factory=dict)
+
+
+class ClearIn(BaseModel):
+    confirm: str
 
 
 class UserIn(BaseModel):
@@ -638,6 +643,55 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
         repo.set_assignments(uid, [(a.category_l, a.category_m) for a in body])
         repo.audit(admin.email, "ASSIGNMENTS_SET", None, {"user_id": uid, "count": len(body)}, now())
         return {"ok": True}
+
+    # ---- system: data status, demo data, clear ------------------------------------------------------------------------
+    demo_job: dict[str, Any] = {"state": "idle", "message": "", "result": None}
+    demo_lock = threading.Lock()
+    local_store = engine.dialect.name in ("sqlite", "duckdb")
+
+    @app.get("/admin/system")
+    def system_status(_: CurrentUser = Depends(require_admin)):
+        busy = demo_job["state"] == "RUNNING"
+        return {"store": engine.dialect.name, "local": local_store, "job": dict(demo_job),
+                "counts": None if busy else demo.counts(engine),                # no queries while the demo loads
+                "integrations": {"kamis": settings.kamis_enabled, "garak": settings.garak_enabled, "openai": settings.vision_enabled,
+                                 "hive": bool(settings.hive.get("host") and settings.hive.get("queries")), "webhook": bool(settings.alert_webhook_url)},
+                "solo_mode": settings.solo_mode}
+
+    def run_demo(actor: str) -> None:
+        try:
+            result = demo.load_demo(engine, settings, tp)
+            demo_job.update(state="DONE", message="", result=result)
+            repo.audit(actor, "DEMO_LOADED_BY_ADMIN", None, result, now())
+        except Exception as e:                       # report the kind of failure, not internals
+            demo_job.update(state="FAILED", message=f"{type(e).__name__}: {str(e)[:200]}", result=None)
+
+    @app.post("/admin/demo", status_code=202)
+    def load_demo_data(admin: CurrentUser = Depends(require_admin)):
+        if not local_store:
+            raise HTTPException(409, "demo data can only be loaded into a local file database (DuckDB or SQLite)")
+        with demo_lock:
+            if demo_job["state"] == "RUNNING":
+                raise HTTPException(409, "demo data is already loading")
+            if demo.has_operational_data(engine):
+                raise HTTPException(409, "the database already holds data; clear it first so demo and real data are not mixed")
+            demo_job.update(state="RUNNING", message="", result=None)
+        threading.Thread(target=run_demo, args=(admin.email,), daemon=True).start()
+        return {"state": "RUNNING"}
+
+    @app.post("/admin/clear")
+    def clear_data(body: ClearIn, admin: CurrentUser = Depends(require_admin)):
+        if not local_store:
+            raise HTTPException(409, "clearing is only available for a local file database (DuckDB or SQLite)")
+        if body.confirm != "DELETE":
+            raise HTTPException(422, 'type DELETE to confirm')
+        with demo_lock:
+            if demo_job["state"] == "RUNNING":
+                raise HTTPException(409, "demo data is loading; wait until it finishes")
+            removed = demo.clear_data(engine)
+            demo_job.update(state="idle", message="", result=None)
+        repo.audit(admin.email, "DATA_CLEARED", None, {k: v for k, v in removed.items() if v}, now())
+        return {"removed": removed}
 
     @app.get("/admin/audit")
     def audit(_: CurrentUser = Depends(require_admin)):

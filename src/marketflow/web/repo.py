@@ -41,7 +41,11 @@ class AppRepository(Repo):
                              {"e": email.strip().lower(), "n": name, "r": role, "h": password_hash}, "user_id")
 
     def list_users(self) -> list[dict[str, Any]]:
-        return self._rows("SELECT user_id, email, name, role, active FROM users ORDER BY user_id")
+        users = self._rows("SELECT user_id, email, name, role, active FROM users ORDER BY user_id")
+        cats: dict[int, list[str]] = {}
+        for r in self._rows("SELECT user_id, category_l, category_m FROM user_category_assignments ORDER BY category_l, category_m"):
+            cats.setdefault(r["user_id"], []).append(r["category_l"] + ("/" + r["category_m"] if r["category_m"] else ""))
+        return [{**u, "categories": cats.get(u["user_id"], [])} for u in users]
 
     def set_active(self, uid: int, active: bool) -> None:
         with self._e.begin() as c:

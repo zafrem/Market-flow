@@ -16,6 +16,15 @@
   </header>
   <main>
     <section id="login">
+      <div class="intro">
+        <h2 data-i18n="login.headline">Wholesale, competitor and own prices on one screen</h2>
+        <p data-i18n="login.about">MarketFlow gathers wholesale prices, competitor prices, your own cost and stock, and search and demand signals, then proposes price changes that protect your margin. A person approves every change; nothing is written to a sales channel.</p>
+        <ul>
+          <li><b data-i18n="login.f1.t">Comparison matrix</b> <span data-i18n="login.f1.d">wholesale, our price, the lowest competitor and the margin side by side</span></li>
+          <li><b data-i18n="login.f2.t">Recommendations</b> <span data-i18n="login.f2.d">proposals that never go below the margin floor, with the reason</span></li>
+          <li><b data-i18n="login.f3.t">Market intelligence</b> <span data-i18n="login.f3.d">category health, trend radar, promotion results</span></li>
+        </ul>
+      </div>
       <form id="login-form">
         <label><span data-i18n="login.email">Email</span> <input name="email" type="email" autocomplete="username" required></label>
         <label><span data-i18n="login.password">Password</span> <input name="password" type="password" autocomplete="current-password" required></label>
@@ -25,7 +34,7 @@
     </section>
     <section id="app" hidden>
       <div id="summary" class="summary" data-i18n-label="summary" aria-label="Summary"></div>
-      <nav><button data-tab="matrix" class="active"><span data-i18n="tab.matrix">Comparison matrix</span></button><button data-tab="health"><span data-i18n="tab.health">Category health</span></button><button data-tab="radar"><span data-i18n="tab.radar">Trend radar</span></button><button data-tab="gap"><span data-i18n="tab.gap">Search gap</span></button><button data-tab="recs"><span data-i18n="tab.recs">Recommendations</span></button><button data-tab="crawlers" class="decider"><span data-i18n="tab.crawlers">Crawlers</span></button><button data-tab="matches" class="decider"><span data-i18n="tab.matches">Product matches</span></button><button data-tab="flyers" class="decider"><span data-i18n="tab.flyers">Flyers</span></button><button data-tab="insights" class="decider"><span data-i18n="tab.insights">Insights</span></button><button data-tab="promos" class="decider"><span data-i18n="tab.promos">Promotions</span></button><button data-tab="review" class="decider"><span data-i18n="tab.review">Review queue</span></button><button data-tab="selectors" class="decider"><span data-i18n="tab.selectors">Selector candidates</span></button></nav>
+      <nav><button data-tab="matrix" class="active"><span data-i18n="tab.matrix">Comparison matrix</span></button><button data-tab="health"><span data-i18n="tab.health">Category health</span></button><button data-tab="radar"><span data-i18n="tab.radar">Trend radar</span></button><button data-tab="gap"><span data-i18n="tab.gap">Search gap</span></button><button data-tab="recs"><span data-i18n="tab.recs">Recommendations</span></button><button data-tab="crawlers" class="decider"><span data-i18n="tab.crawlers">Crawlers</span></button><button data-tab="matches" class="decider"><span data-i18n="tab.matches">Product matches</span></button><button data-tab="flyers" class="decider"><span data-i18n="tab.flyers">Flyers</span></button><button data-tab="insights" class="decider"><span data-i18n="tab.insights">Insights</span></button><button data-tab="promos" class="decider"><span data-i18n="tab.promos">Promotions</span></button><button data-tab="review" class="decider"><span data-i18n="tab.review">Review queue</span></button><button data-tab="selectors" class="decider"><span data-i18n="tab.selectors">Selector candidates</span></button><button data-tab="settings" class="admin-only" hidden><span data-i18n="tab.settings">Settings</span></button></nav>
       <p id="toast" role="status"></p>
       <ul id="qstrip" class="qstrip decider" hidden></ul>
       <div id="matrix">
@@ -106,6 +115,28 @@
       </div>
       <div id="review" hidden>
         <div class="scroll"><table id="review-table"><thead><tr><th data-i18n="th.num">#</th><th data-i18n="th.kind">Kind</th><th data-i18n="th.source">Source</th><th data-i18n="th.item">Item</th><th data-i18n="th.reason">Reason</th><th></th></tr></thead><tbody></tbody></table></div>
+      </div>
+      <div id="settings" hidden>
+        <h2 data-i18n="set.users">Users</h2>
+        <p class="hint" data-i18n="set.users.hint">ADMIN sees everything and manages settings. MD approves price changes in the categories assigned to them. BUYER sees only prices, never costs or margins. Categories: Fresh or Fresh/Fruit, separated by commas.</p>
+        <form id="user-form" class="promo-form">
+          <label><span data-i18n="login.email">Email</span><input name="email" type="email" required maxlength="255"></label>
+          <label><span data-i18n="set.name">Name</span><input name="name" type="text" required maxlength="100"></label>
+          <label><span data-i18n="set.role">Role</span><select name="role"><option>MD</option><option>BUYER</option><option>ADMIN</option></select></label>
+          <label><span data-i18n="set.categories">Categories</span><input name="categories" type="text" maxlength="200" placeholder="Fresh/Fruit, Dairy"></label>
+          <label><span data-i18n="login.password">Password</span><input name="password" type="password" required minlength="10" maxlength="256" autocomplete="new-password"></label>
+          <button type="submit" data-i18n="set.add_user">Add user</button>
+        </form>
+        <div class="scroll"><table id="users-table"><thead><tr><th data-i18n="login.email">Email</th><th data-i18n="set.name">Name</th><th data-i18n="set.role">Role</th><th data-i18n="set.active">Active</th><th data-i18n="set.categories">Categories</th><th></th></tr></thead><tbody></tbody></table></div>
+        <h2 data-i18n="set.data">Data</h2>
+        <p class="hint" id="data-hint"></p>
+        <div id="data-status"></div>
+        <p class="actions"><button id="demo-load" type="button" data-i18n="set.demo">Load demo data</button> <button id="data-clear" type="button" class="danger" data-i18n="set.clear">Clear data…</button></p>
+        <form id="clear-form" class="clear-form" hidden>
+          <p data-i18n="set.clear.warn">This deletes prices, inventory and cost history, competitor prices, matches, recommendations, promotions, demand signals, queues and run history. It keeps users, the catalog, crawler settings, synonyms and the audit trail. It cannot be undone.</p>
+          <label><span data-i18n="set.clear.type">Type DELETE to confirm</span><input name="confirm" type="text" autocomplete="off" required></label>
+          <p><button type="submit" class="danger" data-i18n="set.clear.go">Delete the data</button> <button type="button" id="clear-cancel" data-i18n="set.cancel">Cancel</button></p>
+        </form>
       </div>
       <div id="selectors" hidden>
         <div class="scroll"><table id="selectors-table"><thead><tr><th data-i18n="th.num">#</th><th data-i18n="th.platform">Platform</th><th data-i18n="th.status">Status</th><th data-i18n="th.item">Item</th><th data-i18n="th.title">Title</th><th data-i18n="th.price">Price</th><th></th></tr></thead><tbody></tbody></table></div>

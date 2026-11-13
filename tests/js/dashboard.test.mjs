@@ -633,3 +633,62 @@ test("BUYER never loads flyers", async () => {
   const t = boot({ role: "BUYER" }); await t.login();
   assert.ok(!t.calls.some((c) => c.path.startsWith("/flyers")));
 });
+
+// ---- login description and the ADMIN settings tab ------------------------------------------------------------------------
+const SYSTEM = (over = {}) => ({ store: "duckdb", local: true, job: { state: "idle", message: "", result: null }, solo_mode: true,
+  counts: { ext_public_benchmarks: 0, ext_retail_prices: 0, int_operations_inventory: 0, price_recommendations: 0, promotions: 0, mi_observations: 0, product_channel_map: 0, users: 1, master_products: 8 },
+  integrations: {}, ...over });
+const USERS = { users: [{ user_id: 1, email: "k@x.com", name: "Kim", role: "ADMIN", active: 1, categories: [] }, { user_id: 2, email: "m@x.com", name: "Lee", role: "MD", active: 1, categories: ["Fresh/Fruit"] }] };
+
+test("the sign-in page says what the product is, in both languages", async () => {
+  const t = boot();
+  assert.match(text(t.d.querySelector("#login .intro")), /MarketFlow gathers wholesale prices/);
+  await t.click(t.d.querySelector("#lang"));
+  assert.match(text(t.d.querySelector("#login .intro")), /판매 채널에 가격을 직접 쓰지 않습니다/);
+  assert.ok(t.d.querySelector("#login-form"));
+});
+
+test("settings tab is ADMIN only; MD and BUYER never load it", async () => {
+  for (const role of ["MD", "BUYER"]) {
+    const t = boot({ role }); await t.login();
+    assert.ok(t.d.querySelector('nav button[data-tab="settings"]').hidden);
+    assert.ok(!t.calls.some((c) => c.path.startsWith("/admin")));
+  }
+});
+
+test("settings: list users, add a user with categories, change a role", async () => {
+  const t = boot({ role: "ADMIN", routes: { "GET /admin/users": () => [200, USERS], "GET /admin/system": () => [200, SYSTEM()], "POST /admin/users": () => [201, { user_id: 3 }] } });
+  await t.login();
+  assert.ok(!t.d.querySelector('nav button[data-tab="settings"]').hidden);
+  const rows = t.d.querySelectorAll("#users-table tbody tr");
+  assert.equal(rows.length, 2);
+  assert.ok(rows[0].querySelector("select").disabled);                               // no demoting yourself
+  assert.equal(rows[1].querySelector('input[type=text]').value, "Fresh/Fruit");
+  const f = t.d.querySelector("#user-form");
+  f.elements.email.value = "new@x.com"; f.elements.name.value = "New"; f.elements.role.value = "BUYER"; f.elements.categories.value = "Fresh/Fruit, Dairy"; f.elements.password.value = "long-enough-pw";
+  f.dispatchEvent(new t.w.Event("submit", { cancelable: true, bubbles: true })); await settle();
+  const post = t.calls.find((c) => c.method === "POST" && c.path === "/admin/users");
+  assert.deepEqual(JSON.parse(post.body), { email: "new@x.com", name: "New", role: "BUYER", password: "long-enough-pw" });
+  const put = t.calls.find((c) => c.method === "PUT" && c.path === "/admin/users/3/assignments");
+  assert.deepEqual(JSON.parse(put.body), [{ category_l: "Fresh", category_m: "Fruit" }, { category_l: "Dairy", category_m: "" }]);
+  const sel = rows[1].querySelector("select"); sel.value = "BUYER"; sel.dispatchEvent(new t.w.Event("change")); await settle();
+  assert.deepEqual(JSON.parse(t.calls.find((c) => c.method === "PATCH" && c.path === "/admin/users/2").body), { role: "BUYER" });
+});
+
+test("settings: demo data only into an empty database; clearing needs DELETE typed", async () => {
+  let counts = SYSTEM().counts;
+  const t = boot({ role: "ADMIN", routes: { "GET /admin/users": () => [200, USERS], "GET /admin/system": () => [200, SYSTEM({ counts })], "POST /admin/clear": () => [200, { removed: {} }] } });
+  await t.login();
+  assert.ok(!t.d.querySelector("#demo-load").disabled);                              // empty: demo can load
+  counts = { ...counts, ext_retail_prices: 40 };
+  await t.click(t.d.querySelector('nav button[data-tab="settings"]')); await t.w.eval("loadSystem()"); await settle();
+  assert.ok(t.d.querySelector("#demo-load").disabled);                               // has data: clear first
+  assert.ok(t.d.querySelector("#clear-form").hidden);
+  await t.click(t.d.querySelector("#data-clear"));
+  assert.ok(!t.d.querySelector("#clear-form").hidden);
+  const f = t.d.querySelector("#clear-form");
+  f.elements.confirm.value = "DELETE";
+  f.dispatchEvent(new t.w.Event("submit", { cancelable: true, bubbles: true })); await settle();
+  assert.deepEqual(JSON.parse(t.calls.find((c) => c.path === "/admin/clear").body), { confirm: "DELETE" });
+  assert.ok(f.hidden);
+});

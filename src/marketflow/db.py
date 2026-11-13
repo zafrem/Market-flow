@@ -2,7 +2,9 @@
 (MySQL is initialised by db/init/*.sql instead.)"""
 from __future__ import annotations
 
+import importlib.util
 import re
+import sys
 import time
 from pathlib import Path
 
@@ -14,6 +16,11 @@ from .seed import ALIASES, ITEMS, SOURCES
 from .settings import ROOT
 
 LOCK_WAIT_SECONDS = 15.0
+
+# DuckDB looks for pandas on every bound parameter; when it is not installed each look is a slow path search (about 6 per
+# statement). Marking it as absent makes that lookup fail at once. Nothing here uses pandas.
+if "pandas" not in sys.modules and importlib.util.find_spec("pandas") is None:
+    sys.modules["pandas"] = None  # type: ignore[assignment]
 
 SQLITE_DDL = [
     """CREATE TABLE IF NOT EXISTS master_products (
@@ -143,11 +150,12 @@ def resolve_database_url(url: str) -> str:
     return url
 
 
-def make_engine(url: str) -> Engine:
+def make_engine(url: str, shared: bool = True) -> Engine:
+    """shared=False keeps one connection open (a DuckDB file stays locked meanwhile): for short bulk jobs such as the demo load."""
     url = resolve_database_url(url)
     embedded = url.startswith(("sqlite", "duckdb"))
     kwargs = {} if embedded else {"pool_pre_ping": True}
-    if url.startswith("duckdb") and ":memory:" not in url:
+    if shared and url.startswith("duckdb") and ":memory:" not in url:
         # A DuckDB file is held by one process at a time. Keep it open only while a transaction runs (no pooling) and wait
         # briefly for another process (worker / web / CLI) to let go, so they can share the file one after another.
         kwargs["poolclass"] = NullPool
