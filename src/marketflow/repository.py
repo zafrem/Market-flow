@@ -96,7 +96,7 @@ class SqlRepository:
         if not rows:
             return 0
         payload = [{**r, "extra_metrics": json.dumps(r.get("extra_metrics") or {}, ensure_ascii=False)} for r in rows]
-        sqlite = self._engine.dialect.name == "sqlite"
+        sqlite = self._engine.dialect.name in ("sqlite", "duckdb")
         if sqlite:
             payload = [{k: _sqlite_value(v) for k, v in r.items()} for r in payload]
         with self._engine.begin() as c:
@@ -130,7 +130,7 @@ class SqlRepository:
         if not rows:
             return 0
         rows = [_retail_row(r) for r in rows]
-        if self._engine.dialect.name == "sqlite":
+        if self._engine.dialect.name in ("sqlite", "duckdb"):
             rows = [{k: _sqlite_value(v) for k, v in r.items()} for r in rows]
         with self._engine.begin() as c:   # snapshots are append-only time series: every run adds rows
             c.execute(_INSERT_RETAIL, rows)

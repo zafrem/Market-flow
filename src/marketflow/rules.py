@@ -59,8 +59,8 @@ def validate(rules: Rules) -> None:
             re.compile(p)
     _validate_retail(rules)
     for need in ("internal_sku", "channel_name", "purchase_cost", "current_selling_price", "stock_qty"):
-        if not rules.get("erp", {}).get("columns", {}).get(need):
-            raise ValueError(f"erp.columns.{need} is required")
+        if not rules.get("internal", {}).get("columns", {}).get(need):
+            raise ValueError(f"internal.columns.{need} is required")
 
 
 def _validate_retail(rules: Rules) -> None:

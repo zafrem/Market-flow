@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from marketflow import cli
 from marketflow.db import init_sqlite, make_engine
-from marketflow.erp import import_erp
+from marketflow.internal_data import import_internal
 from marketflow.mi.classify import Classifier, evaluate
 from marketflow.mi.config import load_mi_config
 from marketflow.mi.importer import import_signals
@@ -187,7 +187,7 @@ CAB-1,Napa Cabbage,SHOPA,1000,300,700,11.5,4000,300,10,,10
 def gap_world(world):
     d = date(2026, 10, 27)                                     # inside the search week starting 2026-10-26
     f = write(world, "inv.csv", INV)
-    assert import_erp(f, AppRepository(world.e), world.s, world.tp, d).loaded == 3
+    assert import_internal(f, AppRepository(world.e), world.s, world.tp, d).loaded == 3
     repo = SqlRepository(world.e)
     # a confirmed competitor sells the onion pack (10 x 100g) at 3,000 effective while we charge 5,000
     repo.insert_retail([{"scraped_at": NOW - timedelta(hours=1), "platform": "SHOPB", "std_item_id": 3, "match_confidence": D("0.9"),

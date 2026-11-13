@@ -4,9 +4,21 @@
 # Override the file location with MARKETFLOW_SETTINGS=/path/to/settings.toml
 
 [database]
-# SQLite for local use (relative paths are resolved from the project root; the file is created on first run).
+# Local DuckDB file (default; relative paths are resolved from the project root; the file is created on first run).
+# Worker, web and CLI may share it: each opens the file only while it runs a transaction and waits for the others.
 # MySQL:  "mysql+pymysql://user:pass@127.0.0.1:3306/marketflow?charset=utf8mb4"      (env: DATABASE_URL)
-url = "sqlite:///data/marketflow.db"
+# SQLite still works: "sqlite:///data/marketflow.db"
+url = "duckdb:///data/marketflow.duckdb"
+
+[hive]                 # internal data straight from Hive, read-only (python -m marketflow.cli import-hive); needs: pip install -e '.[hive]'
+# host = "hive.example.internal"
+# port = 10000
+# username = "analyst"
+# database = "default"
+# auth = "LDAP"                  # NONE | LDAP | CUSTOM | KERBEROS
+# password: set the HIVE_PASSWORD environment variable (or here, with the file at chmod 600)
+# [hive.queries]                 # one single SELECT per name; the columns must map to [internal.columns] (aliases in config/extraction.json)
+# inventory = "SELECT sku AS internal_sku, name AS item_name, channel AS channel_name, cost AS purchase_cost, ... FROM mart.inventory"
 
 [auth]
 # Signs login tokens. REQUIRED for the API; >= 32 chars. Generate:  python -c "import secrets; print(secrets.token_urlsafe(48))"
@@ -61,7 +73,7 @@ api_key = ""           # env: GARAK_API_KEY
 # round_to = 10                    # price tick (KRW)
 # flash_discount_pct = 10          # spoilage-risk markdown
 # alert_margin_pct = 10            # LOW_MARGIN flag at or below this net margin
-# disposal_rate_pct = 0            # category average write-off, % of purchase cost; a per-SKU disposal_cost in the ERP file wins
+# disposal_rate_pct = 0            # category average write-off, % of purchase cost; a per-SKU disposal_cost in the internal-data file wins
 # require_confirmed_match = true   # only competitor listings a person graded SAME (Matches) drive prices and alerts
 
 [quality]              # daily data-quality thresholds; breaches raise DATA_QUALITY alerts (every key optional)

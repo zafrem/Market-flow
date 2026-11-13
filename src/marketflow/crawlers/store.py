@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy import text
 
+from ..db import changed, insert_id
 from ..ops_repo import OpsRepository, _dt
 
 STALE_AFTER = timedelta(hours=2)          # a RUNNING row older than this belongs to a crashed process
@@ -25,12 +26,12 @@ class CrawlerStore(OpsRepository):
     def save_settings(self, cid: str, enabled: bool, times: list[str] | None, config: dict[str, Any], by: str, now: datetime) -> None:
         params = {"c": cid, "e": int(enabled), "t": json.dumps(times) if times is not None else None, "cfg": json.dumps(config, ensure_ascii=False), "u": by, "n": now}
         with self._e.begin() as c:
-            if c.execute(text("UPDATE crawler_settings SET enabled=:e, times=:t, config=:cfg, updated_by=:u, updated_at=:n WHERE crawler_id=:c"), self._b(params)).rowcount == 0:
+            if changed(c, "UPDATE crawler_settings SET enabled=:e, times=:t, config=:cfg, updated_by=:u, updated_at=:n WHERE crawler_id=:c", self._b(params)) == 0:
                 c.execute(text("INSERT INTO crawler_settings (crawler_id, enabled, times, config, updated_by, updated_at) VALUES (:c,:e,:t,:cfg,:u,:n)"), self._b(params))
 
     def set_last_slot(self, cid: str, slot: datetime) -> None:
         with self._e.begin() as c:
-            if c.execute(text("UPDATE crawler_settings SET last_slot=:s WHERE crawler_id=:c"), self._b({"s": slot, "c": cid})).rowcount == 0:
+            if changed(c, "UPDATE crawler_settings SET last_slot=:s WHERE crawler_id=:c", self._b({"s": slot, "c": cid})) == 0:
                 c.execute(text("INSERT INTO crawler_settings (crawler_id, enabled, last_slot) VALUES (:c, 1, :s)"), self._b({"s": slot, "c": cid}))
 
     # ---- runs --------------------------------------------------------------------------------
@@ -39,8 +40,8 @@ class CrawlerStore(OpsRepository):
         with self._e.begin() as c:
             if c.execute(text("SELECT 1 FROM crawler_runs WHERE crawler_id=:c AND status IN ('QUEUED','RUNNING')"), {"c": cid}).first():
                 return None
-            return int(c.execute(text("INSERT INTO crawler_runs (crawler_id, trigger_kind, requested_by, status, queued_at) VALUES (:c,'MANUAL',:b,'QUEUED',:n)"),
-                                 self._b({"c": cid, "b": by, "n": now})).lastrowid)
+            return insert_id(c, "INSERT INTO crawler_runs (crawler_id, trigger_kind, requested_by, status, queued_at) VALUES (:c,'MANUAL',:b,'QUEUED',:n)",
+                             self._b({"c": cid, "b": by, "n": now}), "run_id")
 
     def start_run(self, cid: str, trigger: str, by: str, now: datetime, run_id: int | None = None) -> int | None:
         """Claim a run: promotes a QUEUED row (CAS) or inserts a RUNNING one. None if the crawler is already running."""
@@ -48,11 +49,11 @@ class CrawlerStore(OpsRepository):
             if c.execute(text("SELECT 1 FROM crawler_runs WHERE crawler_id=:c AND status='RUNNING'"), {"c": cid}).first():
                 return None
             if run_id is not None:        # promote our QUEUED row; the status check makes it a compare-and-set
-                ok = c.execute(text("UPDATE crawler_runs SET status='RUNNING', started_at=:n WHERE run_id=:r AND status='QUEUED'"),
-                               self._b({"n": now, "r": run_id})).rowcount
+                ok = changed(c, "UPDATE crawler_runs SET status='RUNNING', started_at=:n WHERE run_id=:r AND status='QUEUED'",
+                             self._b({"n": now, "r": run_id}))
                 return run_id if ok else None
-            return int(c.execute(text("INSERT INTO crawler_runs (crawler_id, trigger_kind, requested_by, status, queued_at, started_at) VALUES (:c,:t,:b,'RUNNING',:n,:n)"),
-                                 self._b({"c": cid, "t": trigger, "b": by, "n": now})).lastrowid)
+            return insert_id(c, "INSERT INTO crawler_runs (crawler_id, trigger_kind, requested_by, status, queued_at, started_at) VALUES (:c,:t,:b,'RUNNING',:n,:n)",
+                             self._b({"c": cid, "t": trigger, "b": by, "n": now}), "run_id")
 
     def finish_run(self, run_id: int, status: str, stored: int, message: str, now: datetime) -> None:
         with self._e.begin() as c:
@@ -64,8 +65,8 @@ class CrawlerStore(OpsRepository):
 
     def reap_stale(self, now: datetime) -> int:
         with self._e.begin() as c:
-            return c.execute(text("UPDATE crawler_runs SET status='FAILED', finished_at=:n, message='interrupted (the worker stopped mid-run)' "
-                                  "WHERE status='RUNNING' AND started_at < :cut"), self._b({"n": now, "cut": now - STALE_AFTER})).rowcount
+            return changed(c, "UPDATE crawler_runs SET status='FAILED', finished_at=:n, message='interrupted (the worker stopped mid-run)' "
+                              "WHERE status='RUNNING' AND started_at < :cut", self._b({"n": now, "cut": now - STALE_AFTER}))
 
     def runs(self, cid: str, limit: int = 20) -> list[dict[str, Any]]:
         out = self._rows("SELECT run_id, trigger_kind, requested_by, status, queued_at, started_at, finished_at, rows_loaded, message "

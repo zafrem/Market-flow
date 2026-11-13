@@ -7,10 +7,11 @@ import pytest
 from sqlalchemy import text
 
 from marketflow import cli
+from marketflow.db import insert_id
 from marketflow.db import init_sqlite, make_engine
 from marketflow.decision import service
 from marketflow.decision.service import Actor, WorkflowError
-from marketflow.erp import import_erp
+from marketflow.internal_data import import_internal
 from marketflow.ops_repo import OpsRepository
 from marketflow.repository import SqlRepository
 from marketflow.settings import Settings
@@ -32,7 +33,7 @@ def env(tmp_path):
     init_sqlite(e)
     f = tmp_path / "inv.csv"; f.write_text(CSV, encoding="utf-8")
     repo = OpsRepository(e)
-    assert import_erp(f, repo, s, tp).loaded == 2
+    assert import_internal(f, repo, s, tp).loaded == 2
     # competitor sells the apple pack for 8,400 (700 per 100g x 12) - scraped an hour ago
     SqlRepository(e).insert_retail([{
         "scraped_at": T0.replace(tzinfo=None) - timedelta(hours=1), "platform": "SHOPA", "std_item_id": 1,
@@ -125,14 +126,14 @@ def test_cli_end_to_end(env):
     assert run("apply", "1", "--as", "kim:MD")[0] == 0
     code, txt = run("audit")
     assert "PRICE_APPLIED" in txt
-    code, txt = run("import-erp", str(f))
+    code, txt = run("import-internal", str(f))
     assert code == 0 and "loaded=2 errors=0" in txt
 
 
 def _user(e, email, role, thr, cats=(), active=1):
     with e.begin() as c:
-        uid = c.execute(text("INSERT INTO users (email,name,role,password_hash,active) VALUES (:e,:e,:r,'x',:a)"),
-                        {"e": email, "r": role, "a": active}).lastrowid
+        uid = insert_id(c, "INSERT INTO users (email,name,role,password_hash,active) VALUES (:e,:e,:r,'x',:a)",
+                        {"e": email, "r": role, "a": active}, "user_id")
         c.execute(text("INSERT INTO user_preferences (user_id, alert_margin_bep) VALUES (:u,:t)"), {"u": uid, "t": thr})
         for cat in cats:
             c.execute(text("INSERT INTO user_category_assignments (user_id,category_l,category_m) VALUES (:u,:c,'')"), {"u": uid, "c": cat})

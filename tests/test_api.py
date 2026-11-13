@@ -9,7 +9,7 @@ from sqlalchemy import text
 
 from marketflow.db import init_sqlite, make_engine
 from marketflow.decision import service
-from marketflow.erp import import_erp
+from marketflow.internal_data import import_internal
 from marketflow.repository import SqlRepository
 from marketflow.settings import Settings
 from marketflow.time_provider import FixedTimeProvider
@@ -53,7 +53,7 @@ def world(tmp_path):
     init_sqlite(e)
     repo = AppRepository(e)
     f = tmp_path / "inv.csv"; f.write_text(CSV, encoding="utf-8")
-    assert import_erp(f, repo, s, tp).loaded == 2
+    assert import_internal(f, repo, s, tp).loaded == 2
     SqlRepository(e).insert_retail([{
         "scraped_at": T0.replace(tzinfo=None) - timedelta(hours=1), "platform": "SHOPA", "std_item_id": 1,
         "match_confidence": Decimal("0.9"), "channel_item_code": "X1", "product_title": "사과 1.2kg", "original_price": 9000,

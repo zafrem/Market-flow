@@ -1,13 +1,19 @@
-"""Engine creation and SQLite bootstrap. (MySQL is initialised by db/init/*.sql instead.)"""
+"""Engine creation and the embedded-store bootstrap (DuckDB by default, SQLite also works).
+(MySQL is initialised by db/init/*.sql instead.)"""
 from __future__ import annotations
 
+import re
+import time
 from pathlib import Path
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine, make_url
+from sqlalchemy.pool import NullPool
 
 from .seed import ALIASES, ITEMS, SOURCES
 from .settings import ROOT
+
+LOCK_WAIT_SECONDS = 15.0
 
 SQLITE_DDL = [
     """CREATE TABLE IF NOT EXISTS master_products (
@@ -126,9 +132,9 @@ SQLITE_DDL = [
 
 
 def resolve_database_url(url: str) -> str:
-    """Relative SQLite paths are anchored at the project root so the DB doesn't depend on CWD."""
+    """Relative SQLite/DuckDB paths are anchored at the project root so the DB doesn't depend on CWD."""
     u = make_url(url)
-    if u.get_backend_name() == "sqlite" and u.database and u.database != ":memory:":
+    if u.get_backend_name() in ("sqlite", "duckdb") and u.database and u.database != ":memory:":
         db = Path(u.database)
         if not db.is_absolute():
             db = ROOT / db
@@ -139,8 +145,44 @@ def resolve_database_url(url: str) -> str:
 
 def make_engine(url: str) -> Engine:
     url = resolve_database_url(url)
-    kwargs = {} if url.startswith("sqlite") else {"pool_pre_ping": True}
-    return create_engine(url, future=True, **kwargs)
+    embedded = url.startswith(("sqlite", "duckdb"))
+    kwargs = {} if embedded else {"pool_pre_ping": True}
+    if url.startswith("duckdb") and ":memory:" not in url:
+        # A DuckDB file is held by one process at a time. Keep it open only while a transaction runs (no pooling) and wait
+        # briefly for another process (worker / web / CLI) to let go, so they can share the file one after another.
+        kwargs["poolclass"] = NullPool
+    engine = create_engine(url, future=True, **kwargs)
+    if kwargs.get("poolclass") is NullPool:
+        @event.listens_for(engine, "do_connect")
+        def _connect_when_free(dialect, conn_rec, cargs, cparams):
+            deadline = time.monotonic() + LOCK_WAIT_SECONDS
+            while True:
+                try:
+                    return dialect.connect(*cargs, **cparams)
+                except Exception as e:
+                    if "lock" not in str(e).lower() or time.monotonic() > deadline:
+                        raise
+                    time.sleep(0.05)
+    return engine
+
+
+def is_embedded(engine) -> bool:
+    """True for the local single-file stores (DuckDB, SQLite): no row locks, no MySQL-only syntax."""
+    return engine.dialect.name in ("sqlite", "duckdb")
+
+
+def changed(conn, sql: str, params: dict | None = None) -> int:
+    """Run an UPDATE/DELETE and return the rows it changed (DuckDB reports -1 for rowcount, so it uses RETURNING)."""
+    if conn.dialect.name == "duckdb":
+        return len(conn.execute(text(sql + " RETURNING 1"), params or {}).fetchall())
+    return conn.execute(text(sql), params or {}).rowcount
+
+
+def insert_id(conn, sql: str, params: dict, pk: str) -> int:
+    """Run an INSERT and return the new primary key (DuckDB has no lastrowid, so it uses RETURNING)."""
+    if conn.dialect.name == "duckdb":
+        return int(conn.execute(text(sql + f" RETURNING {pk}"), params).scalar_one())
+    return int(conn.execute(text(sql), params).lastrowid)
 
 
 # Columns added after the first release: an existing development database gets them on start (MySQL: db/migrations).
@@ -153,12 +195,31 @@ SQLITE_ADDED_COLUMNS = [
 ]
 
 
+_AUTOINC = re.compile(r"(\w+) INTEGER PRIMARY KEY AUTOINCREMENT")
+
+
+def duckdb_ddl() -> list[str]:
+    """The SQLite DDL rewritten for DuckDB: AUTOINCREMENT becomes a sequence default."""
+    out: list[str] = []
+    for stmt in SQLITE_DDL:
+        m = re.search(r"CREATE TABLE IF NOT EXISTS (\w+)", stmt)
+        if m and _AUTOINC.search(stmt):
+            seq = f"seq_{m.group(1)}"
+            out.append(f"CREATE SEQUENCE IF NOT EXISTS {seq}")
+            stmt = _AUTOINC.sub(lambda k: f"{k.group(1)} INTEGER PRIMARY KEY DEFAULT nextval('{seq}')", stmt)
+        out.append(stmt)
+    return out
+
+
 def init_sqlite(engine: Engine) -> None:
-    """Create tables and seed the starter catalog. Idempotent."""
+    """Create tables and seed the starter catalog on the local store (DuckDB or SQLite). Idempotent."""
+    duck = engine.dialect.name == "duckdb"
     with engine.begin() as c:
-        for stmt in SQLITE_DDL:
+        for stmt in (duckdb_ddl() if duck else SQLITE_DDL):
             c.execute(text(stmt))
         for table, column, decl in SQLITE_ADDED_COLUMNS:
+            if duck:      # DuckDB stores are new: the CREATE TABLE statements above already carry every column
+                continue
             have = {r[1] for r in c.execute(text(f"PRAGMA table_info({table})"))}
             if column not in have:
                 c.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {decl}"))

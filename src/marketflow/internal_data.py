@@ -1,4 +1,5 @@
-"""F-01-3: ERP/WMS inventory import from CSV or XLSX. Header aliases come from config (erp.columns).
+"""F-01-3: internal data (inventory and cost) import from CSV/XLSX files (Excel downloaded from SharePoint) or a Hive query
+(hive_source.py). Header aliases come from config (internal.columns).
 Valid rows load; bad rows are reported with line numbers. A file missing a required column loads nothing."""
 from __future__ import annotations
 
@@ -91,11 +92,18 @@ def _date(raw: Any, default: date) -> date:
         raise ValueError(f"recorded_date: {raw!r} is not YYYY-MM-DD") from None
 
 
-def import_erp(path: Path | str, repo: OpsRepository, settings: Settings, tp: TimeProvider,
-               recorded_date: date | None = None) -> ImportResult:
-    path, res = Path(path), ImportResult()
-    columns = current_rules()["erp"]["columns"]
-    headers, lines = read_table(path)
+def import_internal(path: Path | str, repo: OpsRepository, settings: Settings, tp: TimeProvider,
+                    recorded_date: date | None = None) -> ImportResult:
+    """Load a CSV/XLSX file."""
+    headers, lines = read_table(Path(path))
+    return import_table(headers, lines, repo, settings, tp, recorded_date)
+
+
+def import_table(headers: list[str], lines: list[tuple[int, list[Any]]], repo: OpsRepository, settings: Settings,
+                 tp: TimeProvider, recorded_date: date | None = None) -> ImportResult:
+    """Validate and load rows from any source (file or Hive); `lines` is [(line number, cells)]."""
+    res = ImportResult()
+    columns = current_rules()["internal"]["columns"]
     index: dict[str, int] = {}
     for canon, aliases in columns.items():
         wanted = {_norm(a) for a in aliases} | {_norm(canon)}

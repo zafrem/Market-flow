@@ -52,7 +52,7 @@ def build_collectors(s: Settings, transport: Transport, tp: TimeProvider) -> lis
 
 
 def prepare_db(engine: Engine, tp: TimeProvider) -> None:
-    if engine.dialect.name == "sqlite":
+    if engine.dialect.name in ("sqlite", "duckdb"):
         init_sqlite(engine)            # idempotent: creates tables + seed on first run
     else:
         ensure_partitions(engine, today_kst(tp))

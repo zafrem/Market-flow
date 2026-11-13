@@ -15,7 +15,7 @@ from marketflow.decision import service
 from marketflow.decision.calc import disposal_cost, net_margin, price_floor, simulate_price_match
 from marketflow.decision.config import DecisionConfig, load_decision_config
 from marketflow.decision.service import Actor, WorkflowError
-from marketflow.erp import import_erp
+from marketflow.internal_data import import_internal
 from marketflow.repository import SqlRepository
 from marketflow.scrape.extract import extract_listings, parse_bonus
 from marketflow.settings import Settings
@@ -70,7 +70,7 @@ def test_bep_edge_cases():
     assert simulate_price_match(10000, 10000, D(70), COST, True, D("0.10"))["bep_status"] == "NOT_A_CUT"
 
 
-# ---- ERP import: disposal column ---------------------------------------------------------------------------
+# ---- internal-data import: disposal column ---------------------------------------------------------------------------
 @pytest.fixture()
 def env(tmp_path):
     tp = FixedTimeProvider(T0)
@@ -80,7 +80,7 @@ def env(tmp_path):
     init_sqlite(e)
     repo = AppRepository(e)
     f = tmp_path / "inv.csv"; f.write_text(CSV, encoding="utf-8")
-    assert import_erp(f, repo, s, tp).loaded == 1
+    assert import_internal(f, repo, s, tp).loaded == 1
     return type("E", (), dict(tp=tp, s=s, e=e, repo=repo, tmp=tmp_path))
 
 
@@ -92,12 +92,12 @@ def listing(env, code="X1", price=8400, **extra):
         "extraction_source": "SELECTOR", "region_code": "SEOUL", **extra}])
 
 
-def test_erp_disposal_column_is_stored_and_blank_means_category_rate(env):
+def test_internal_disposal_column_is_stored_and_blank_means_category_rate(env):
     inv = env.repo.inventory_on(T0.date())
     assert inv[0]["disposal_cost"] is None                              # blank cell -> NULL -> category rate (2% of 5000 = 100)
     f = env.tmp / "inv2.csv"
     f.write_text(CSV.replace("12,\n", "12,333\n"), encoding="utf-8")
-    assert import_erp(f, env.repo, env.s, env.tp).loaded == 1
+    assert import_internal(f, env.repo, env.s, env.tp).loaded == 1
     assert env.repo.inventory_on(T0.date())[0]["disposal_cost"] == D("333")
     # the floor was computed with the disposal cost included
     floor_with = env.repo.inventory_on(T0.date())[0]["min_price_floor"]
@@ -273,6 +273,8 @@ def test_export_is_audited_decider_only_and_safe(api):
 
 def test_export_neutralises_spreadsheet_formulas(api):
     env = api.env
+    if env.e.dialect.name == "duckdb":
+        pytest.skip("DuckDB cannot update a row that other tables reference; the app never renames catalog items")
     with env.e.begin() as c:
         c.execute(text("UPDATE master_products SET item_name='=HYPERLINK(1)' WHERE std_item_id=1"))
     rows = list(csv.reader(io.StringIO(api.c.get("/matrix/export", headers=api.h("md")).text)))

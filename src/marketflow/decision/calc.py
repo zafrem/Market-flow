@@ -21,7 +21,7 @@ def net_price(price: int | Decimal, vat_inclusive: bool, vat_rate: Decimal) -> D
 
 
 def disposal_cost(purchase_cost: Decimal, sku_disposal: Decimal | None, rate_pct: Decimal) -> Decimal:
-    """Per-unit disposal (write-off) cost: the SKU's own figure when the ERP supplies one, otherwise the category
+    """Per-unit disposal (write-off) cost: the SKU's own figure when internal data supplies one, otherwise the category
     average disposal rate applied to the purchase cost."""
     return sku_disposal if sku_disposal is not None else purchase_cost * rate_pct / 100
 

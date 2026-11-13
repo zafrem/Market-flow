@@ -14,15 +14,15 @@
  data/inbox/* ──▶└──────────────┬───────────────────────────────────────────────────────────────────────┘
                                 │ 기록
                          ┌──────▼───────┐         ┌──────────────────────────────┐
-  ERP CSV/XLSX ─ cli ───▶│  MySQL 8 /   │◀────────│ backend-api (FastAPI + 정적   │◀── 브라우저 (MD / BUYER / ADMIN)
-  MI CSV/XLSX  ─ cli ───▶│  SQLite(개발)│  읽기   │ 대시보드, 같은 프로세스)       │
+  사내 데이터 CSV/XLSX ─ cli ───▶│  MySQL 8 /   │◀────────│ backend-api (FastAPI + 정적   │◀── 브라우저 (MD / BUYER / ADMIN)
+  MI CSV/XLSX  ─ cli ───▶│  DuckDB(로컬)│  읽기   │ 대시보드, 같은 프로세스)       │
                          └──────────────┘         └──────────────┬───────────────┘
                                                                  │ ./inbox 볼륨을 워커와 공유
 ```
 
 | 구성 요소 | 진입점 | 역할 |
 |---|---|---|
-| `db` | MySQL 8 (`db/init/001_schema.sql`) | 기록의 원천. SQLite는 로컬 개발 전용입니다(파티션 없음, NUMERIC이 정확한 소수가 아님). |
+| `db` | MySQL 8 (`db/init/001_schema.sql`) | 기록의 원천. 로컬은 DuckDB 파일(기본)이며 SQLite도 됩니다(파티션 없음, NUMERIC이 정확한 소수가 아님). |
 | `collector-worker` | `python -m marketflow.worker` | 크롤러를 일정대로 실행하고, 의사결정 작업을 돌리고, 알림을 보냅니다. **하나만** 실행합니다. |
 | `backend-api` | `python -m marketflow.web` | REST API와 단일 페이지 대시보드. 외부 사이트를 직접 가져오지 않습니다. |
 | CLI | `python -m marketflow.cli` | 운영 작업: 가져오기, 결정/승인/적용, 사용자, 감사, 크롤러 단발 실행. |
@@ -32,11 +32,12 @@
 | 패키지 / 모듈 | 역할 |
 |---|---|
 | `settings.py`, `config/settings.toml` | 계층형 설정: TOML 파일을 환경변수가 덮어씁니다. `--check`에서는 비밀 값을 가립니다. |
-| `db.py`, `repository.py`, `ops_repo.py` | SQLAlchemy 2 엔진/DDL(MySQL, SQLite)과 리포지토리. `SQLITE_DDL`은 `scripts/gen_schema.py`가 `db/init/001_schema.sql`과 같은 모델에서 생성합니다. |
+| `db.py`, `repository.py`, `ops_repo.py` | SQLAlchemy 2 엔진/DDL(MySQL, DuckDB, SQLite)과 리포지토리. `SQLITE_DDL`은 `scripts/gen_schema.py`가 `db/init/001_schema.sql`과 같은 모델에서 생성합니다. |
 | `collectors/` | `KamisCollector`, `GarakCollector`: 공개 도매 벤치마크를 `ext_public_benchmarks`에 넣습니다. |
 | `scrape/` | 소매 스크래핑: 전송, 사람처럼 보이는 간격, HTML 정제, `selfheal` 추출기(LLM이 복구한 셀렉터). |
 | `title_parser.py`, `units.py`, `curation.py` | 상품 제목 파싱, 단위 가격 정규화, 채널 상품을 `master_products`에 매핑. |
-| `erp.py` | 재고/원가 가져오기(CSV/XLSX, 영어/한국어 헤더, 오류는 줄 번호로 보고). |
+| `hive_source.py` | Hive 직접 조회(읽기 전용 SELECT만, 비밀번호는 오류·로그에 안 나옴). 결과는 `internal_data.import_table`로 같은 검증을 거칩니다. |
+| `internal_data.py` | 재고/원가 가져오기(CSV/XLSX, 영어/한국어 헤더, 오류는 줄 번호로 보고). |
 | `decision/` | `calc.py`(가격 계산), `engine.py`(추천 규칙), `service.py`(실행, 승인, 반려, 적용, 되돌리기, 감사 기록), `config.py`. |
 | `mi/` | 마켓 인텔리전스: 가져오기, 저장소, `analysis.py`(카테고리 헬스, 트렌드 레이더), 이중 언어 `messages.py`. |
 | `crawlers/` | 데이터 항목마다 크롤러 하나를 두는 프레임워크: `base.py`(규약), `adapters.py`, `store.py`, `service.py`. |
@@ -55,7 +56,7 @@
 |---|---|---|
 | 카탈로그 | `master_products`, `master_product_aliases`, `product_channel_map` | `std_item_id`가 모든 출처를 잇는 키입니다. |
 | 시장 데이터 | `ext_public_benchmarks`, `ext_retail_prices` | MySQL에서는 시간 기준 파티션입니다(`partitions.py`가 미래 파티션을 계속 만들어 둡니다). |
-| 내부 | `int_operations_inventory`, `inventory_revisions` | ERP 가져오기: 재고, 원가, 가격. 적재할 때마다 적재 시각이 찍힌 이력이 추가됩니다. 원가 데이터는 BUYER 응답에 나가지 않습니다. |
+| 내부 | `int_operations_inventory`, `inventory_revisions` | 사내 데이터 가져오기: 재고, 원가, 가격. 적재할 때마다 적재 시각이 찍힌 이력이 추가됩니다. 원가 데이터는 BUYER 응답에 나가지 않습니다. |
 | 의사결정 | `price_recommendations` | 상태: PENDING → APPROVED → APPLIED, 또는 SUPPRESSED / REJECTED / REVERTED. 사람이 만든 제안(초안)은 `flags`에 근거 스냅샷을 담습니다. |
 | 운영 | `review_queue`, `alert_log`, `selector_candidates`, `audit_log` | 검토 항목과 알림은 중복을 제거합니다. |
 | 접근 | `users`, `user_category_assignments`, `user_watchlists`, `user_preferences` | |
@@ -68,7 +69,7 @@
 
 ### 4.1 가격 추천
 1. 수집기와 소매 크롤러가 벤치마크와 경쟁사 가격을 기록합니다(제목 파서가 `std_item_id`에 매칭하며, 매칭되지 않은 제목은 `review_queue`로 갑니다).
-2. `import-erp`가 재고와 원가를 적재합니다.
+2. `import-internal`가 재고와 원가를 적재합니다.
 3. 사람이 SAME으로 확정한 경쟁사 상품만 반영합니다(`product_channel_map.reviewed_at`). 시뮬레이터는 맞춘 실구매가에서의 예상 마진과 손익분기 수량을 더합니다. `decide` 작업(`cli decide`도 동일)은 재고 행마다 평가합니다: 목표 마진과 VAT로 바닥가를 계산하고, 최저 경쟁사에 맞추거나 더 싸게 하며, 한 번에 움직이는 폭을 제한하고(`max_step_pct`), 쿨다운을 적용하고, 도매가가 오르는 동안은 인하를 보류하고, 폐기 위험이 있으면 인하합니다. 결과는 사유 코드와 플래그가 붙은 `price_recommendations` 행이거나, 사유가 붙은 `SUPPRESSED`입니다.
 4. MD/ADMIN이 승인합니다(혼자 쓰기 모드: 제안자가 자기 제안을 승인할 수 있음. 팀 모드: 작성자 ≠ 승인자이며 마진 방어선 아래는 ADMIN). `apply`는 내부 장부만 갱신합니다. **판매 채널에는 아무것도 쓰지 않습니다.** 엔진은 보조 역할이며, `export-prices`가 변경 목록을 만듭니다.
 5. 모든 전이는 원자적 상태 갱신(compare-and-set)이며 `audit_log`에 기록됩니다.
@@ -118,7 +119,7 @@
 
 | 계층 | 명령 | 비고 |
 |---|---|---|
-| 오프라인 전체 | `.venv/bin/pytest` | SQLite와 픽스처, 네트워크와 토큰 불필요. 가짜 시계로 며칠간의 무인 운영을 시뮬레이션하는 종단 간 자율 운영 테스트(`tests/test_autonomy.py`)를 포함합니다. |
+| 오프라인 전체 | `.venv/bin/pytest` | 로컬 파일 DB와 픽스처, 네트워크와 토큰 불필요. 가짜 시계로 며칠간의 무인 운영을 시뮬레이션하는 종단 간 자율 운영 테스트(`tests/test_autonomy.py`)를 포함합니다. |
 | 대시보드 | `cd tests/js && npm test` (pytest에서도 실행) | 실제 `app.js` + `index.html`을 jsdom에서 가짜 API로 실행합니다. |
 | MySQL | `MARKETFLOW_TEST_DB_URL=... pytest -m mysql` | DDL, 파티션, upsert, JSON/ENUM 열, 이력 조회. |
 | 실서비스 | `MARKETFLOW_LIVE=1 pytest -m live` | 설정한 토큰으로 실제 KAMIS/가락시장을 호출합니다. |

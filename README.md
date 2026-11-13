@@ -9,7 +9,7 @@
 | [docs/PLAYBOOK.md](docs/PLAYBOOK.md) | 설치, 일상 운영, 문제 해결, 백업, 장애 대응 |
 | [docs/MI_FRAMEWORK.md](docs/MI_FRAMEWORK.md) | 마켓 인텔리전스 요구사항 원문 정리 |
 
-## 로컬 실행 (Docker 없이, SQLite)
+## 로컬 실행 (Docker 없이, DuckDB)
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
@@ -17,7 +17,7 @@ cp config/settings.example.toml config/settings.toml && chmod 600 config/setting
 $EDITOR config/settings.toml                # KAMIS 키/ID, 가락시장 URL/키를 넣습니다 (git 제외 파일)
 
 .venv/bin/python -m marketflow.worker --check   # 설정 상태 확인 (토큰은 가려서 표시)
-.venv/bin/python -m marketflow.worker --once    # 지금 한 번 수집 -> data/marketflow.db (처음 실행 때 생성·시드)
+.venv/bin/python -m marketflow.worker --once    # 지금 한 번 수집 -> data/marketflow.duckdb (처음 실행 때 생성·시드)
 .venv/bin/python -m marketflow.worker           # 또는 계속 실행하며 KST 일정(06:00, 09:00)에 맞춰 수집
 ```
 
@@ -28,7 +28,7 @@ $EDITOR config/settings.toml                # KAMIS 키/ID, 가락시장 URL/키
 ## 테스트
 
 ```bash
-.venv/bin/pytest                                   # 오프라인: 픽스처 + SQLite, 토큰 불필요
+.venv/bin/pytest                                   # 오프라인: 픽스처 + 로컬 파일 DB, 토큰 불필요
 MARKETFLOW_LIVE=1 .venv/bin/pytest -m live -s      # 설정한 토큰으로 실제 KAMIS/가락시장 호출
 MARKETFLOW_TEST_DB_URL=mysql+pymysql://... .venv/bin/pytest -m mysql   # MySQL DDL/파티션 테스트
 ```
@@ -43,10 +43,17 @@ MARKETFLOW_TEST_DB_URL=mysql+pymysql://... .venv/bin/pytest -m mysql   # MySQL D
 
 셀렉터가 더 이상 맞지 않으면 페이지를 정제해 LLM에 보냅니다(`settings.toml`에서 `llm.mock=false`와 `gemini_api_key` 설정, 기본값은 오프라인 목). LLM이 돌려준 레코드는 검증하고 페이지 본문과 대조합니다. 검증된 대체 셀렉터는 사람이 `SelfHealingExtractor.approve(platform, actor)`를 호출할 때까지 *대기 후보*로 보관되며, 승인하면 `config/overrides.json`에 기록됩니다. 실제 브라우저 전송은 선택 사항입니다: `pip install -e '.[browser]' && playwright install chromium`.
 
-## ERP 가져오기, 의사결정, 승인 (3단계)
+## 로컬 저장소와 사내 데이터 유입
+
+- **로컬 저장소는 DuckDB 파일 하나**(`data/marketflow.duckdb`, `[database] url`)입니다. DuckDB 파일은 한 번에 한 프로세스만 열 수 있어서, 워커·웹·CLI는 트랜잭션이 도는 동안만 파일을 열고 다른 프로세스가 놓을 때까지 최대 15초 기다립니다(동시에 써도 유실되지 않음을 4개 프로세스로 확인). 운영(Docker)은 계속 MySQL 8이고, `sqlite:///...`도 그대로 동작합니다.
+- **Excel(SharePoint)**: SharePoint에서 `.xlsx`/`.csv`를 내려받아 `import-internal 파일`로 넣습니다(자동 다운로드는 하지 않습니다). 열 이름은 `config/extraction.json`의 `internal.columns` 별칭(한글/영문)으로 맞춥니다.
+- **Hive**: `config/settings.toml`의 `[hive]`에 접속 정보와 이름 붙인 SELECT 쿼리를 적고 `pip install -e '.[hive]'` 후 `import-hive --query 이름`을 실행합니다. 비밀번호는 `HIVE_PASSWORD` 환경변수에 두며 로그·오류·`repr`에 나오지 않습니다. 단일 읽기 전용 SELECT만 허용하고(INSERT/DROP 등과 `;` 거부), 한 번에 최대 `max_rows`(기본 20만)행입니다. 쿼리 결과의 열 이름은 파일과 같은 별칭 규칙을 씁니다. 실제 Hive 서버에 대한 연결은 아직 검증하지 못했고, 가짜 연결로 테스트했습니다.
+
+## 사내 데이터 가져오기, 의사결정, 승인 (3단계)
 
 ```bash
-.venv/bin/python -m marketflow.cli import-erp inventory.xlsx      # .csv 또는 .xlsx, 잘못된 행은 줄 번호로 보고
+.venv/bin/python -m marketflow.cli import-internal inventory.xlsx      # .csv 또는 .xlsx(SharePoint에서 받은 Excel), 잘못된 행은 줄 번호로 보고
+.venv/bin/python -m marketflow.cli import-hive --query inventory        # Hive를 직접 조회(읽기 전용 SELECT), 같은 검증을 거침
 .venv/bin/python -m marketflow.cli decide                         # 오늘 재고 평가 -> PENDING / SUPPRESSED 추천
 .venv/bin/python -m marketflow.cli recs --status PENDING
 .venv/bin/python -m marketflow.cli approve 3 --as kim:MD          # MD/ADMIN만 가능, 이어서 apply / revert (모두 감사 기록)
@@ -54,7 +61,7 @@ MARKETFLOW_TEST_DB_URL=mysql+pymysql://... .venv/bin/pytest -m mysql   # MySQL D
 .venv/bin/python -m marketflow.cli audit
 ```
 
-헤더 별칭(영어/한국어)은 `config/extraction.json`의 `erp.columns`에, 가격 책정 파라미터는 `config/settings.toml`의 `[decision]` 표에 있습니다(`settings.example.toml` 참고). 엔진은 보조 역할입니다. `apply`는 내부 장부만 갱신하며 판매 채널에는 아무것도 쓰지 않습니다.
+헤더 별칭(영어/한국어)은 `config/extraction.json`의 `internal.columns`에, 가격 책정 파라미터는 `config/settings.toml`의 `[decision]` 표에 있습니다(`settings.example.toml` 참고). 엔진은 보조 역할입니다. `apply`는 내부 장부만 갱신하며 판매 채널에는 아무것도 쓰지 않습니다.
 
 ## API와 대시보드 (4단계)
 
@@ -73,7 +80,7 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"      # 출력값을
 ## 가격·마진 (개정 명세, P0)
 - **확정된 매칭만 반영합니다.** 수집한 경쟁사 상품은 *미확정* 후보로 저장되고, MD/ADMIN이 **SAME**으로 등급을 매긴 뒤에야 추천, 매트릭스, 알림에 쓰입니다(대시보드 > 상품 매칭, `cli matches --unconfirmed`, `cli match PLATFORM CODE ITEM_ID --as kim:MD [--grade SAME|SIMILAR|SUBSTITUTE]`, `PUT /matches/{platform}/{code}`). SIMILAR/SUBSTITUTE는 기록만 하고 사용하지 않습니다. `[decision]`의 `require_confirmed_match = false`로 이 규칙을 끌 수 있습니다.
 - **실구매가.** 경쟁사 비교는 공개 쿠폰, 배송비, 증정 수량(1+1 = 개당 50%)을 반영한 가격으로 합니다. `config/extraction.json`의 선택 셀렉터 필드 `coupon`, `shipping_fee`, `bonus`가 이를 채웁니다. 없으면 표시 가격이 곧 구매가입니다.
-- **순마진에 폐기비 포함**: ERP 열 `disposal_cost`(폐기비, 단위당), 없으면 `[decision] disposal_rate_pct`를 매입가에 적용합니다.
+- **순마진에 폐기비 포함**: 사내 데이터 열 `disposal_cost`(폐기비, 단위당), 없으면 `[decision] disposal_rate_pct`를 매입가에 적용합니다.
 - **맞추면(If we match)**: 매트릭스와 모든 추천에 경쟁사 실구매가로 맞췄을 때의 예상 마진과 주간 손익분기 수량(`주간 수량 x 현재 마진 / 변경 후 마진`)이 표시됩니다. 인하 후 남는 마진이 없으면 "해당 가격에서 마진 없음"으로 표시합니다.
 - **내보내기**: 대시보드 > 비교 매트릭스 > 비교표 내보내기(CSV) 또는 `GET /matrix/export`(MD/ADMIN, `MATRIX_EXPORTED`로 감사 기록).
 - **알림에는 원가, 마진, 가격 수치가 없습니다.** SKU, 상황, 링크(`[server] public_url`)만 담깁니다. SKU와 유형당 24시간에 한 번만 보냅니다.

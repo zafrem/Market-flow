@@ -17,7 +17,7 @@ else:  # pragma: no cover
 log = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PATH = ROOT / "config" / "settings.toml"
-DEFAULT_DB_URL = "sqlite:///data/marketflow.db"
+DEFAULT_DB_URL = "duckdb:///data/marketflow.duckdb"
 
 
 @dataclass(frozen=True)
@@ -48,6 +48,7 @@ class Settings:
     insights: Mapping[str, Any] = field(default_factory=dict)   # raw [insights] table (P2 analysis thresholds)
     quality: Mapping[str, Any] = field(default_factory=dict)    # raw [quality] table (data-quality thresholds)
     mi: Mapping[str, Any] = field(default_factory=dict)         # raw [mi] table (Market Intelligence tunables)
+    hive: Mapping[str, Any] = field(default_factory=dict)       # raw [hive] table (internal-data queries; see hive_source.py)
 
     @property
     def kamis_enabled(self) -> bool:
@@ -123,4 +124,5 @@ def load_settings(path: Path | str | None = None, env: Mapping[str, str] | None 
         quality=dict(data.get("quality", {})),
         insights=dict(data.get("insights", {})),
         mi=dict(data.get("mi", {})),
+        hive=dict(data.get("hive", {})),
     )

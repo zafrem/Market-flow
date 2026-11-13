@@ -1,6 +1,7 @@
-"""Operator CLI for ERP import and the recommendation workflow.
+"""Operator CLI for internal-data import and the recommendation workflow.
 
-  python -m marketflow.cli import-erp FILE.csv|xlsx [--date YYYY-MM-DD]
+  python -m marketflow.cli import-internal FILE.csv|xlsx [--date YYYY-MM-DD]
+  python -m marketflow.cli import-hive [--query inventory] [--date YYYY-MM-DD]
   python -m marketflow.cli decide
   python -m marketflow.cli recs [--status PENDING]
   python -m marketflow.cli approve|reject|apply|revert ID --as NAME:ROLE      (ROLE: ADMIN | MD | BUYER)
@@ -25,7 +26,8 @@ from datetime import date, datetime, time
 
 from .db import init_sqlite, make_engine
 from .decision import service
-from .erp import import_erp
+from .hive_source import HiveError, fetch_hive, load_hive_config
+from .internal_data import import_internal, import_table
 from . import curation
 from .ops_repo import Repo
 from .settings import Settings, load_settings
@@ -37,7 +39,8 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
     out = out or sys.stdout
     ap = argparse.ArgumentParser(prog="marketflow.cli")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    p = sub.add_parser("import-erp"); p.add_argument("file"); p.add_argument("--date")
+    p = sub.add_parser("import-internal"); p.add_argument("file"); p.add_argument("--date")
+    p = sub.add_parser("import-hive"); p.add_argument("--query", default="inventory"); p.add_argument("--date")
     sub.add_parser("decide")
     p = sub.add_parser("recs"); p.add_argument("--status")
     for name in ("approve", "reject", "apply", "revert"):
@@ -68,7 +71,7 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
 
     settings, tp = settings or load_settings(), tp or SystemTimeProvider()
     engine = make_engine(settings.database_url)
-    if engine.dialect.name == "sqlite":
+    if engine.dialect.name in ("sqlite", "duckdb"):
         init_sqlite(engine)
     repo = Repo(engine)
 
@@ -142,11 +145,22 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
         users.set_assignments(u["user_id"], [tuple((c.split("/", 1) + [""])[:2]) for c in a.category])
         print(f"assigned {a.category} to {a.email}", file=out)
         return 0
-    if a.cmd == "import-erp":
-        res = import_erp(a.file, repo, settings, tp, date.fromisoformat(a.date) if a.date else None)
+    if a.cmd == "import-internal":
+        res = import_internal(a.file, repo, settings, tp, date.fromisoformat(a.date) if a.date else None)
         print(f"loaded={res.loaded} errors={len(res.errors)}", file=out)
         for e in res.errors:
             print(f"  line {e.line} [{e.field}] {e.message}", file=out)
+        return 1 if res.errors and res.loaded == 0 else 0
+    if a.cmd == "import-hive":
+        try:
+            headers, lines = fetch_hive(load_hive_config(settings.hive), a.query)
+        except HiveError as e:
+            print(f"refused: {e}", file=out)
+            return 2
+        res = import_table(headers, lines, repo, settings, tp, date.fromisoformat(a.date) if a.date else None)
+        print(f"loaded={res.loaded} errors={len(res.errors)}", file=out)
+        for e in res.errors:
+            print(f"  row {e.line} [{e.field}] {e.message}", file=out)
         return 1 if res.errors and res.loaded == 0 else 0
     if a.cmd == "decide":
         made = service.run_decisions(repo, settings, tp)

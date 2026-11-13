@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from .db import changed, insert_id
 from .repository import _sqlite_value
 
 
@@ -35,7 +36,8 @@ class ReviewItem:
 class OpsRepository:
     def __init__(self, engine: Engine):
         self._e = engine
-        self._sqlite = engine.dialect.name == "sqlite"
+        self._sqlite = engine.dialect.name in ("sqlite", "duckdb")
+        self._duck = engine.dialect.name == "duckdb"
 
     def _b(self, params: dict[str, Any]) -> dict[str, Any]:
         return {k: _sqlite_value(v) for k, v in params.items()} if self._sqlite else params
@@ -215,8 +217,8 @@ class OpsRepository:
         """Confirm (or re-grade) a match by hand. Creates the row when the listing was never proposed."""
         p = self._b({"p": platform, "c": code, "i": std_item_id, "g": grade, "a": actor, "t": now})
         with self._e.begin() as c:
-            n = c.execute(text("UPDATE product_channel_map SET std_item_id=:i, match_method='MANUAL', match_confidence=1, "
-                               "match_grade=:g, reviewed_by=:a, reviewed_at=:t WHERE platform=:p AND channel_item_code=:c"), p).rowcount
+            n = changed(c, "UPDATE product_channel_map SET std_item_id=:i, match_method='MANUAL', match_confidence=1, "
+                           "match_grade=:g, reviewed_by=:a, reviewed_at=:t WHERE platform=:p AND channel_item_code=:c", p)
             if not n:
                 c.execute(text("INSERT INTO product_channel_map (platform, channel_item_code, std_item_id, pack_size_factor, "
                                "match_method, match_confidence, match_grade, reviewed_by, reviewed_at) "
@@ -224,8 +226,8 @@ class OpsRepository:
 
     def remove_match(self, platform: str, code: str) -> bool:
         with self._e.begin() as c:
-            return c.execute(text("DELETE FROM product_channel_map WHERE platform=:p AND channel_item_code=:c"),
-                             {"p": platform, "c": code}).rowcount == 1
+            return changed(c, "DELETE FROM product_channel_map WHERE platform=:p AND channel_item_code=:c",
+                           {"p": platform, "c": code}) == 1
 
     def wholesale_change_pct(self, std_item_id: int) -> Decimal | None:
         """Mean normalized benchmark price: newest recorded_date vs the one before it."""
@@ -252,9 +254,8 @@ class OpsRepository:
                      "s": rec.suggested_price, "r": rec.reason_code, "f": json.dumps(rec.flags, ensure_ascii=False),
                      "st": rec.status})
         with self._e.begin() as c:
-            res = c.execute(text("INSERT INTO price_recommendations (created_at, std_item_id, channel_name, current_price, "
-                                 "suggested_price, reason_code, flags, status) VALUES (:t,:i,:c,:cur,:s,:r,:f,:st)"), p)
-            return int(res.lastrowid)
+            return insert_id(c, "INSERT INTO price_recommendations (created_at, std_item_id, channel_name, current_price, "
+                                "suggested_price, reason_code, flags, status) VALUES (:t,:i,:c,:cur,:s,:r,:f,:st)", p, "rec_id")
 
     def get_recommendation(self, rec_id: int) -> dict[str, Any] | None:
         r = self._rows("SELECT * FROM price_recommendations WHERE rec_id=:i", i=rec_id)
@@ -276,9 +277,8 @@ class OpsRepository:
     def transition(self, rec_id: int, expect: str, new: str, actor: str, now: datetime) -> bool:
         """Atomic compare-and-set: only moves the recommendation if it is still in `expect`."""
         with self._e.begin() as c:
-            res = c.execute(text("UPDATE price_recommendations SET status=:n, decided_by=:a, decided_at=:t "
-                                 "WHERE rec_id=:i AND status=:e"), self._b({"n": new, "a": actor, "t": now, "i": rec_id, "e": expect}))
-            return res.rowcount == 1
+            return changed(c, "UPDATE price_recommendations SET status=:n, decided_by=:a, decided_at=:t "
+                              "WHERE rec_id=:i AND status=:e", self._b({"n": new, "a": actor, "t": now, "i": rec_id, "e": expect})) == 1
 
     def set_status(self, rec_id: int, status: str, actor: str, now: datetime) -> None:
         with self._e.begin() as c:
@@ -322,9 +322,8 @@ class QueueMixin:
 
     def resolve_review(self, review_id: int, actor: str, now: datetime) -> bool:
         with self._e.begin() as c:
-            res = c.execute(text("UPDATE review_queue SET status='RESOLVED', resolved_by=:a, resolved_at=:t "
-                                 "WHERE review_id=:i AND status='OPEN'"), self._b({"a": actor, "t": now, "i": review_id}))
-            return res.rowcount == 1
+            return changed(c, "UPDATE review_queue SET status='RESOLVED', resolved_by=:a, resolved_at=:t "
+                              "WHERE review_id=:i AND status='OPEN'", self._b({"a": actor, "t": now, "i": review_id})) == 1
 
     # ---- alert log --------------------------------------------------------------------------------
     def recently_sent(self, key: str, since: datetime) -> bool:
@@ -347,8 +346,8 @@ class QueueMixin:
                 "SELECT selectors FROM selector_candidates WHERE platform=:p AND status='PENDING'", p=platform)):
             return None
         with self._e.begin() as c:
-            return int(c.execute(text("INSERT INTO selector_candidates (created_at, platform, selectors) VALUES (:t,:p,:s)"),
-                                 self._b({"t": now, "p": platform, "s": blob})).lastrowid)
+            return insert_id(c, "INSERT INTO selector_candidates (created_at, platform, selectors) VALUES (:t,:p,:s)",
+                             self._b({"t": now, "p": platform, "s": blob}), "cand_id")
 
     def list_candidates(self, status: str | None = "PENDING") -> list[dict[str, Any]]:
         rows = self._rows("SELECT * FROM selector_candidates" + (" WHERE status=:s" if status else "") + " ORDER BY cand_id",
@@ -359,9 +358,8 @@ class QueueMixin:
 
     def decide_candidate(self, cand_id: int, status: str, actor: str, now: datetime) -> bool:
         with self._e.begin() as c:
-            res = c.execute(text("UPDATE selector_candidates SET status=:s, decided_by=:a, decided_at=:t "
-                                 "WHERE cand_id=:i AND status='PENDING'"), self._b({"s": status, "a": actor, "t": now, "i": cand_id}))
-            return res.rowcount == 1
+            return changed(c, "UPDATE selector_candidates SET status=:s, decided_by=:a, decided_at=:t "
+                              "WHERE cand_id=:i AND status='PENDING'", self._b({"s": status, "a": actor, "t": now, "i": cand_id})) == 1
 
     # ---- competitor stock-out events -----------------------------------------------------------------------
     def competitor_stockouts(self, since: datetime) -> list[dict[str, Any]]:

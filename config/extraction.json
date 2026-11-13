@@ -125,7 +125,7 @@
       }
     }
   },
-  "erp": {
+  "internal": {
     "columns": {
       "recorded_date": [
         "recorded_date",

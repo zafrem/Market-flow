@@ -10,7 +10,7 @@ from marketflow import cli
 from marketflow.db import init_sqlite, make_engine
 from marketflow.decision import service
 from marketflow.decision.service import Actor, WorkflowError
-from marketflow.erp import import_erp
+from marketflow.internal_data import import_internal
 from marketflow.repository import SqlRepository
 from marketflow.settings import Settings
 from marketflow.snapshot import snapshot
@@ -37,7 +37,7 @@ def env(tmp_path, monkeypatch):
     init_sqlite(e)
     repo = AppRepository(e)
     f = tmp_path / "inv.csv"; f.write_text(CSV, encoding="utf-8")
-    assert import_erp(f, repo, s, tp).loaded == 2
+    assert import_internal(f, repo, s, tp).loaded == 2
     return type("E", (), dict(tp=tp, s=s, e=e, repo=repo, tmp=tmp_path))
 
 
@@ -129,7 +129,7 @@ def test_a_retroactive_cost_correction_does_not_change_what_was_known_before(env
     day = date(2026, 11, 3)
     env.tp.set(T0 + timedelta(days=2))                                # on Nov 5 finance corrects Nov 3's apple cost 5000 -> 6000
     f = env.tmp / "fix.csv"; f.write_text(CSV.replace("APPLE-1,Apple,SHOPA,5000", "APPLE-1,Apple,SHOPA,6000"), encoding="utf-8")
-    assert import_erp(f, env.repo, env.s, env.tp, day).loaded == 2
+    assert import_internal(f, env.repo, env.s, env.tp, day).loaded == 2
     before = {r["internal_sku"]: r for r in snapshot(env.repo, env.s, day, NOW + timedelta(hours=1))}      # Nov 3, 02:00 UTC
     now = {r["internal_sku"]: r for r in snapshot(env.repo, env.s, day)}
     assert before["APPLE-1"]["purchase_cost"] == "5000.00" and now["APPLE-1"]["purchase_cost"] == "6000.00"

@@ -4,7 +4,7 @@ MarketFlow를 운영하고 문제를 해결하는 절차입니다. 구성 요소
 
 ## 1. 처음 설치
 
-### 로컬 (SQLite)
+### 로컬 (DuckDB)
 1. `python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'`
 2. `cp config/settings.example.toml config/settings.toml && chmod 600 config/settings.toml`
 3. 비밀 값을 만듭니다: `python -c "import secrets; print(secrets.token_urlsafe(48))"` → `[auth] jwt_secret`.
@@ -39,7 +39,7 @@ MarketFlow를 운영하고 문제를 해결하는 절차입니다. 구성 요소
 5. 알림 채널: `CRAWLER_FAILED`, `LOW_MARGIN`, 품절, 오류 알림을 확인합니다.
 
 ### 3.2 가격 추천 (MD)
-1. 오늘 재고가 자동으로 들어오지 않았다면 가져옵니다: `cli import-erp inventory.xlsx` (CSV 또는 XLSX, 잘못된 행은 줄 번호와 함께 나오며, 고쳐서 다시 가져옵니다).
+1. 오늘 재고가 자동으로 들어오지 않았다면 가져옵니다: `cli import-internal inventory.xlsx`(SharePoint에서 받은 Excel) 또는 `cli import-hive --query inventory` (CSV 또는 XLSX, 잘못된 행은 줄 번호와 함께 나오며, 고쳐서 다시 가져옵니다).
 2. 추천은 `decide` 작업(수집 30분 뒤) 뒤에 나타나거나 `cli decide`로 바로 만듭니다. 다시 실행해도 안전하며 중복이 생기지 않습니다.
 3. 대시보드에서 PENDING 행을 하나씩 봅니다: 현재 가격 대 제안 가격, 사유 코드, 플래그(역마진, 폐기 위험, 오래된 데이터).
 4. `approve` 후 `apply`, 또는 `reject`. CLI: `cli approve 3 --as kim:MD`, `cli apply 3 --as kim:MD`.
@@ -110,7 +110,7 @@ MarketFlow를 운영하고 문제를 해결하는 절차입니다. 구성 요소
 | 대시보드 업로드 거부 | 5MB 초과, 파일 인박스 크롤러가 아님, 관리자가 아님 | 파일을 나누거나 인박스 폴더를 직접 씁니다. |
 | 뉴스 크롤러가 언급 0건 | 추적 키워드가 아직 없음, 피드에 접근 불가, 사설 호스트로 거부됨 | SEARCH 데이터를 먼저 가져오고, 워커 호스트에서 URL을 시험하고, 공개 URL을 씁니다. |
 | 경쟁사 가격이 없거나 이상함 | 셀렉터가 깨짐, 추출 오류가 확대됨 | 오류 알림과 `cli selectors`를 보고, 복구 후보를 승인하거나 `config/extraction.json`을 고칩니다. |
-| 추천이 없음 | 오늘 재고 없음, 상품 미매칭, 전부 보류됨 | `cli import-erp`를 하고 `cli recs --status SUPPRESSED`로 사유 코드를 확인합니다. |
+| 추천이 없음 | 오늘 재고 없음, 상품 미매칭, 전부 보류됨 | `cli import-internal`를 하고 `cli recs --status SUPPRESSED`로 사유 코드를 확인합니다. |
 | 전단 이미지가 읽히지 않음 | OpenAI 키 없음, 전단 크롤러 꺼짐, 5MB 초과, PNG/JPEG/WebP가 아님 | `worker --check`의 `vision_enabled`, 실행 메시지, `data/inbox/flyer/failed/`를 봅니다. |
 | 카테고리 헬스가 "관심만" 표시 | 선행 검정 미통과 또는 4기간 미만 | 이력을 더 가져옵니다. 의도된 동작이며 버그가 아닙니다. |
 | 바이어에게 카테고리가 안 보임 | 배정이 없음 | `cli assign`. |

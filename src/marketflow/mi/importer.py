@@ -11,7 +11,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from ..erp import ImportResult, RowError, _norm, read_table
+from ..internal_data import ImportResult, RowError, _norm, read_table
 from dataclasses import dataclass
 
 from .classify import Classifier

@@ -8,6 +8,7 @@ from typing import Any
 
 from sqlalchemy import text
 
+from ..db import changed
 from ..ops_repo import OpsRepository, _dec
 
 _UPSERT_SQLITE = ("INSERT INTO mi_observations (signal_type, period_start, category_l, keyword, metric, value, source) "
@@ -25,7 +26,8 @@ class MiStore(OpsRepository):
         """Insert or overwrite; with keep_max an existing larger value wins (for counts that are re-derived from a rolling window)."""
         if not rows:
             return 0
-        sql = text((_KEEP_MAX_SQLITE if keep_max else _UPSERT_SQLITE) if self._sqlite else (_KEEP_MAX_MYSQL if keep_max else _UPSERT_MYSQL))
+        keep = _KEEP_MAX_SQLITE.replace("MAX(value,", "GREATEST(value,") if self._duck else _KEEP_MAX_SQLITE
+        sql = text((keep if keep_max else _UPSERT_SQLITE) if self._sqlite else (_KEEP_MAX_MYSQL if keep_max else _UPSERT_MYSQL))
         with self._e.begin() as c:
             c.execute(sql, [self._b(r) for r in rows])
         return len(rows)
@@ -54,12 +56,12 @@ class MiStore(OpsRepository):
             raise ValueError(f"{a!r} is already the canonical keyword of other aliases; remove those first")
         with self._e.begin() as conn:
             p = self._b({"a": a, "c": c, "u": actor, "t": now})
-            if not conn.execute(text("UPDATE mi_synonyms SET canonical=:c, updated_by=:u, updated_at=:t WHERE alias=:a"), p).rowcount:
+            if not changed(conn, "UPDATE mi_synonyms SET canonical=:c, updated_by=:u, updated_at=:t WHERE alias=:a", p):
                 conn.execute(text("INSERT INTO mi_synonyms (alias, canonical, updated_by, updated_at) VALUES (:a,:c,:u,:t)"), p)
 
     def remove_synonym(self, alias: str) -> bool:
         with self._e.begin() as conn:
-            return conn.execute(text("DELETE FROM mi_synonyms WHERE alias=:a"), {"a": alias.strip()}).rowcount == 1
+            return changed(conn, "DELETE FROM mi_synonyms WHERE alias=:a", {"a": alias.strip()}) == 1
 
     def fold_synonyms(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Replace aliases by their canonical keyword and add up rows that now share a key (counts, GMV, searches)."""

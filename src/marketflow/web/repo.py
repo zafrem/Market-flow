@@ -8,6 +8,7 @@ from typing import Any
 
 from sqlalchemy import text
 
+from ..db import insert_id
 from ..decision.calc import disposal_cost, net_margin, q2, round_price, simulate_price_match
 from ..decision.config import load_decision_config
 from ..ops_repo import Repo, _dec, _dt, newest_per_listing
@@ -36,9 +37,8 @@ class AppRepository(Repo):
 
     def create_user(self, email: str, name: str, role: str, password_hash: str) -> int:
         with self._e.begin() as c:
-            res = c.execute(text("INSERT INTO users (email, name, role, password_hash) VALUES (:e,:n,:r,:h)"),
-                            {"e": email.strip().lower(), "n": name, "r": role, "h": password_hash})
-            return int(res.lastrowid)
+            return insert_id(c, "INSERT INTO users (email, name, role, password_hash) VALUES (:e,:n,:r,:h)",
+                             {"e": email.strip().lower(), "n": name, "r": role, "h": password_hash}, "user_id")
 
     def list_users(self) -> list[dict[str, Any]]:
         return self._rows("SELECT user_id, email, name, role, active FROM users ORDER BY user_id")
@@ -54,7 +54,7 @@ class AppRepository(Repo):
     def update_user(self, uid: int, role: str | None, active: bool | None) -> bool:
         """One transaction. Refuses (returns False) if it would leave no active ADMIN."""
         with self._e.begin() as c:
-            row = c.execute(text("SELECT role, active FROM users WHERE user_id=:i FOR UPDATE" if self._e.dialect.name != "sqlite"
+            row = c.execute(text("SELECT role, active FROM users WHERE user_id=:i FOR UPDATE" if self._e.dialect.name not in ("sqlite", "duckdb")
                                  else "SELECT role, active FROM users WHERE user_id=:i"), {"i": uid}).mappings().first()
             if row is None:
                 return False

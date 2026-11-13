@@ -41,3 +41,19 @@ def auto_confirm_matches(request, monkeypatch):
         return n
 
     monkeypatch.setattr(SqlRepository, "insert_retail", insert_and_confirm)
+
+
+@pytest.fixture(autouse=True)
+def local_store_backend(monkeypatch):
+    """MARKETFLOW_TEST_BACKEND=duckdb runs the suite's local-file databases on DuckDB instead of SQLite."""
+    import os
+    if os.environ.get("MARKETFLOW_TEST_BACKEND") != "duckdb":
+        return
+    from marketflow import db as db_mod
+    real = db_mod.create_engine
+
+    def create(url, *a, **k):
+        if isinstance(url, str) and url.startswith("sqlite:///"):
+            url = url.replace("sqlite:///", "duckdb:///", 1)
+        return real(url, *a, **k)
+    monkeypatch.setattr(db_mod, "create_engine", create)

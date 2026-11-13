@@ -10,7 +10,7 @@ from conftest import FIX
 from marketflow import cli, curation
 from marketflow.db import init_sqlite, make_engine
 from marketflow.decision.service import Actor, WorkflowError
-from marketflow.erp import import_erp
+from marketflow.internal_data import import_internal
 from marketflow.llm import MockLLM
 from marketflow.notify import Notifier
 from marketflow.ops_repo import Repo
@@ -57,7 +57,7 @@ def world(tmp_path, isolated_rules):
     e = make_engine(s.database_url); init_sqlite(e)
     repo = Repo(e)
     f = tmp_path / "inv.csv"; f.write_text(CSV, encoding="utf-8")
-    assert import_erp(f, repo, s, tp, date(2026, 11, 3)).loaded == 2
+    assert import_internal(f, repo, s, tp, date(2026, 11, 3)).loaded == 2
     hook, sleeps = Webhook(), []
 
     async def sleep(sec):

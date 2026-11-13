@@ -150,7 +150,7 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
         raise RuntimeError(f"auth.jwt_secret must be at least {MIN_SECRET_LEN} characters (config/settings.toml or JWT_SECRET)")
     tp = tp or SystemTimeProvider()
     engine = engine or make_engine(settings.database_url)
-    if engine.dialect.name == "sqlite":
+    if engine.dialect.name in ("sqlite", "duckdb"):
         init_sqlite(engine)
     repo = AppRepository(engine)
     mi_store = MiStore(engine)
