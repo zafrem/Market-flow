@@ -598,7 +598,6 @@ test("insights: promotion verdicts, sales response basis, long discounts and new
   assert.match(text(fresh), /1\.5/);
   assert.match(text(dairy), /1 of 3 promotions needed/);                             // Dairy: not enough promotions, no numbers
   assert.match(text(t.d.querySelector("#ins-prolonged tbody")), /24 \/ 30/);
-  assert.match(text(t.d.querySelector("#ins-new tbody")), /2026-10-31/);
   await t.click(t.d.querySelector("#lang"));
   assert.match(text(t.d.querySelector('nav button[data-tab="insights"]')), /인사이트/);
   assert.match(text(t.d.querySelector("#ins-promos tbody")), /효과 없음/);

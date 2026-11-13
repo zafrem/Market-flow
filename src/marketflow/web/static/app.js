@@ -277,7 +277,7 @@ async function openFlyer(id, keepImage) {
   page.replaceChildren(split);
 }
 
-// ---- insights: promotion results, sales response, long discounts, new products -----------------------------------------
+// ---- insights: promotion results, sales response, long discounts -----------------------------------------
 async function loadInsights() {
   const d = await api("/insights");
   const fill = (id, cols, rows, make) => { const body = $(id + " tbody"); body.replaceChildren(); if (!rows.length) emptyRow(body, cols, t("ins.empty")); rows.forEach((r) => body.append(make(r))); };
@@ -290,7 +290,6 @@ async function loadInsights() {
     ? tr(cat, num(r.promotions_used), el("td", r.span[0] + " – " + r.span[1], "num"), num(r.elasticity.pessimistic), num(r.elasticity.base), num(r.elasticity.optimistic))
     : tr(cat, num(r.promotions_used), el("td", t("ins.of", { n: r.promotions_used, need: r.needed }), "num"), num("–"), num("–"), num("–")));
   fill("#ins-prolonged", 4, d.prolonged_discounts, (x) => tr(x.platform, x.title, num(x.days_discounted + " / " + x.days_observed), num(x.share_pct + "%")));
-  fill("#ins-new", 3, d.new_products, (x) => tr(x.platform, x.title, el("td", x.first_seen.slice(0, 10), "num")));
 }
 
 // ---- promotion calendar -------------------------------------------------------------------------------------------
