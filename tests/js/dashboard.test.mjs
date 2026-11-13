@@ -642,9 +642,9 @@ const USERS = { users: [{ user_id: 1, email: "k@x.com", name: "Kim", role: "ADMI
 
 test("the sign-in page says what the product is, in both languages", async () => {
   const t = boot();
-  assert.match(text(t.d.querySelector("#login .intro")), /for food retail, fresh and processed/);
+  assert.match(text(t.d.querySelector("#login .intro")), /food retail \(fresh and processed\)/);
   await t.click(t.d.querySelector("#lang"));
-  assert.match(text(t.d.querySelector("#login .intro")), /판매 채널에 가격을 직접 쓰지 않습니다/);
+  assert.match(text(t.d.querySelector("#login .intro")), /판매 채널에는 아무것도 쓰지 않습니다/);
   assert.ok(t.d.querySelector("#login-form"));
 });
 
