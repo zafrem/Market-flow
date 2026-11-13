@@ -57,8 +57,13 @@ CATALOG: dict[str, tuple[str, str, str, int, int, int, int]] = {
     "Ramen": ("Processed", "Noodle", "라면", 360, 3600, 4980, 520),
     "Dumpling": ("Processed", "Frozen", "만두", 520, 5200, 8900, 920),
     "Gochujang": ("Processed", "Sauce", "고추장", 680, 6800, 11900, 1240),
+    "Strawberry": ("Fresh", "Fruit", "딸기", 1300, 14500, 21900, 2350),
+    "Tomato": ("Fresh", "Vegetable", "토마토", 480, 5400, 8900, 960),
+    "Sweet Potato": ("Fresh", "Vegetable", "고구마", 300, 3300, 5900, 600),
+    "Kimchi": ("Processed", "Side Dish", "김치", 420, 4600, 7900, 830),
+    "Instant Rice": ("Processed", "Rice", "즉석밥", 380, 4000, 6500, 680),
 }
-EXTRA_ITEMS = ["Egg", "Milk", "Yogurt", "Ramen", "Dumpling", "Gochujang"]    # added to the starter catalog (fresh produce); removed again by clear
+EXTRA_ITEMS = ["Egg", "Milk", "Yogurt", "Ramen", "Dumpling", "Gochujang", "Strawberry", "Tomato", "Sweet Potato", "Kimchi", "Instant Rice"]    # added to the starter catalog (fresh produce); removed again by clear
 CHANNELS = {"OWN_MALL": (Decimal("3.5"), 1.0), "SHOPA": (Decimal("11.5"), 1.03)}   # fee %, price factor
 PLATFORMS = {"COUPANG": 0.97, "KURLY": 1.12, "SSG": 1.05}
 HISTORY_DAYS, SNAPSHOT_DAYS = 60, 30
@@ -128,12 +133,12 @@ def load_demo(engine: Engine, settings: Settings, tp: TimeProvider, today: date 
         ids = {r[1]: r[0] for r in c.execute(text("SELECT std_item_id, item_name FROM master_products"))}
 
     # ---- wholesale benchmarks: 60 days, KAMIS and Garak; pear and garlic rise over the last week ----------------------
-    trend = {n: _wave(rng, HISTORY_DAYS, 0.012, 0.14 if n in ("Pear", "Garlic") else 0.0) for n in CATALOG}
+    trend = {n: _wave(rng, HISTORY_DAYS, 0.012, 0.14 if n in ("Pear", "Garlic") else 0.18 if n == "Strawberry" else -0.08 if n == "Tomato" else 0.0) for n in CATALOG}
     rows = []
     for k in range(HISTORY_DAYS):
         day = today - timedelta(days=HISTORY_DAYS - 1 - k)
         for name, (l, m, ko, ws, *_x) in CATALOG.items():
-            if name in EXTRA_ITEMS and name != "Egg":
+            if name in EXTRA_ITEMS and name not in ("Egg", "Strawberry", "Tomato", "Sweet Potato"):
                 continue                                         # public wholesale sources cover produce and eggs only
             for src, bias in (("KAMIS", 1.0), ("GARAK", 1.04)):
                 p = ws * trend[name][k] * bias * rng.uniform(0.985, 1.015)
@@ -156,7 +161,8 @@ def load_demo(engine: Engine, settings: Settings, tp: TimeProvider, today: date 
                 return up
         return 0.0
     base_sales = {"Apple": 38, "Pear": 24, "Onion": 62, "Potato": 55, "Napa Cabbage": 30, "Radish": 26,
-                  "Green Onion": 40, "Garlic": 18, "Milk": 90, "Yogurt": 48, "Egg": 70, "Ramen": 120, "Dumpling": 44, "Gochujang": 16}
+                  "Green Onion": 40, "Garlic": 18, "Milk": 90, "Yogurt": 48, "Egg": 70, "Ramen": 120, "Dumpling": 44, "Gochujang": 16,
+                  "Strawberry": 20, "Tomato": 34, "Sweet Potato": 36, "Kimchi": 58, "Instant Rice": 85}
     for k in range(HISTORY_DAYS):
         day = today - timedelta(days=HISTORY_DAYS - 1 - k)
         batch, weekend = [], 1.25 if day.weekday() >= 5 else 1.0
@@ -204,7 +210,7 @@ def load_demo(engine: Engine, settings: Settings, tp: TimeProvider, today: date 
                 original = int(round(sale / 0.85 / 10) * 10) if discounted else sale
                 coupon = 500 if rng.random() < 0.06 else 0
                 bonus = Decimal(1) if (plat == "KURLY" and name == "Yogurt" and k >= SNAPSHOT_DAYS - 6) else Decimal(0)
-                out = (name == "Pear" and plat == "SSG" and k >= SNAPSHOT_DAYS - 2) or rng.random() < 0.02
+                out = (name == "Pear" and plat == "SSG" and k >= SNAPSHOT_DAYS - 2) or rng.random() < 0.02 or (name == "Strawberry" and plat == "COUPANG" and k >= SNAPSHOT_DAYS - 3)
                 eff = Decimal(sale - coupon) / (Decimal(10) * (1 + bonus))
                 retail.append({"scraped_at": at, "platform": plat, "std_item_id": ids[name], "match_confidence": Decimal("0.93"),
                                "channel_item_code": code, "product_title": f"{ko} 1kg", "original_price": original, "sale_price": sale,
@@ -216,6 +222,13 @@ def load_demo(engine: Engine, settings: Settings, tp: TimeProvider, today: date 
             sale = 7900
             retail.append({"scraped_at": at, "platform": "KURLY", "std_item_id": ids["Yogurt"], "match_confidence": Decimal("0.71"),
                            "channel_item_code": "KURLY-NEW-GREEK", "product_title": "그릭 요거트 프리미엄 1kg", "original_price": sale,
+                           "sale_price": sale, "normalized_unit_price": Decimal(sale) / 10, "is_out_of_stock": 0, "badge_info": "신상",
+                           "extraction_source": "SELECTOR", "region_code": "SEOUL", "coupon_discount": 0, "shipping_fee": 0,
+                           "bonus_qty": Decimal(0), "effective_unit_price": Decimal(sale) / 10})
+    for plat, code, title, item, sale, first in NEW_LISTINGS:               # more new competitor products, each first seen `first` days ago
+        for k in range(SNAPSHOT_DAYS - first, SNAPSHOT_DAYS):
+            retail.append({"scraped_at": now - timedelta(days=SNAPSHOT_DAYS - 1 - k, hours=1), "platform": plat, "std_item_id": ids[item],
+                           "match_confidence": Decimal("0.7"), "channel_item_code": code, "product_title": title, "original_price": sale,
                            "sale_price": sale, "normalized_unit_price": Decimal(sale) / 10, "is_out_of_stock": 0, "badge_info": "신상",
                            "extraction_source": "SELECTOR", "region_code": "SEOUL", "coupon_discount": 0, "shipping_fee": 0,
                            "bonus_qty": Decimal(0), "effective_unit_price": Decimal(sale) / 10})
@@ -258,9 +271,14 @@ KEYWORDS = [("사과", "Fresh", 900, 0.004, 0.09), ("배", "Fresh", 600, 0.003, 
             ("요거트", "Processed", 800, 0.035, 0.11), ("그릭요거트", "Processed", 200, 0.09, 0.06), ("라면", "Processed", 1700, 0.002, 0.02),
             ("만두", "Processed", 1100, 0.012, 0.025), ("고추장", "Processed", 350, -0.005, 0.09), ("밀키트", "Processed", 1400, 0.02, 0.015),
             ("곤약면", "Processed", 120, 0.11, 0.07), ("냉동김밥", "Processed", 260, 0.07, 0.08), ("비건라면", "Processed", 40, 0.14, 0.05),
-            ("두부", "Processed", 500, -0.02, 0.10), ("컵밥", "Processed", 700, -0.03, 0.08)]
-NEWS = {"그릭요거트": 0.5, "곤약면": 0.4, "비건라면": 0.3, "샤인머스캣": 0.35, "밀키트": 0.25, "마늘": 0.2}      # media mentions per week, scaled by recency
-NEW_PRODUCTS = {"그릭요거트": 2, "곤약면": 3, "냉동김밥": 2, "밀키트": 1}
+            ("두부", "Processed", 500, -0.02, 0.10), ("컵밥", "Processed", 700, -0.03, 0.08),
+            ("딸기", "Fresh", 650, 0.05, 0.07), ("토마토", "Fresh", 520, -0.012, 0.08), ("고구마", "Fresh", 480, 0.02, 0.09),
+            ("김치", "Processed", 900, 0.004, 0.06), ("즉석밥", "Processed", 1300, 0.006, 0.03),
+            ("단백질바", "Processed", 90, 0.13, 0.06), ("오트밀", "Processed", 150, 0.09, 0.07), ("두유", "Processed", 380, 0.05, 0.09)]
+NEWS = {"그릭요거트": 0.5, "곤약면": 0.4, "비건라면": 0.3, "샤인머스캣": 0.35, "밀키트": 0.25, "마늘": 0.2, "단백질바": 0.3, "딸기": 0.15}      # media mentions per week, scaled by recency
+NEW_LISTINGS = [("COUPANG", "COUPANG-NEW-KIMCHI", "비건 김치 1kg", "Kimchi", 9800, 4), ("SSG", "SSG-NEW-RICE", "저당 즉석밥 6입", "Instant Rice", 7900, 6),
+                ("KURLY", "KURLY-NEW-STRAW", "설향 딸기 프리미엄 500g", "Strawberry", 15900, 3), ("COUPANG", "COUPANG-NEW-TOMATO", "대추방울토마토 1kg", "Tomato", 9900, 9)]
+NEW_PRODUCTS = {"그릭요거트": 2, "곤약면": 3, "냉동김밥": 2, "밀키트": 1, "단백질바": 2, "오트밀": 1, "두유": 1}
 
 
 def _load_signals(store: MiStore, rng: random.Random, today: date) -> int:

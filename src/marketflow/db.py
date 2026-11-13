@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import re
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -150,6 +151,9 @@ def resolve_database_url(url: str) -> str:
     return url
 
 
+_CONNECT_LOCK = threading.Lock()
+
+
 def make_engine(url: str, shared: bool = True) -> Engine:
     """shared=False keeps one connection open (a DuckDB file stays locked meanwhile): for short bulk jobs such as the demo load."""
     url = resolve_database_url(url)
@@ -166,9 +170,11 @@ def make_engine(url: str, shared: bool = True) -> Engine:
             deadline = time.monotonic() + LOCK_WAIT_SECONDS
             while True:
                 try:
-                    return dialect.connect(*cargs, **cparams)
+                    with _CONNECT_LOCK:                   # threads of one process must not attach the same file at the same moment
+                        return dialect.connect(*cargs, **cparams)
                 except Exception as e:
-                    if "lock" not in str(e).lower() or time.monotonic() > deadline:
+                    msg = str(e).lower()
+                    if not ("lock" in msg or "already attached" in msg or "file handle conflict" in msg) or time.monotonic() > deadline:
                         raise
                     time.sleep(0.05)
     return engine

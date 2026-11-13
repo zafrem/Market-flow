@@ -25,7 +25,7 @@ def test_demo_fills_every_area_with_plausible_figures(loaded):
     for table in ("ext_public_benchmarks", "ext_retail_prices", "int_operations_inventory", "inventory_revisions", "promotions",
                   "mi_observations", "price_recommendations", "product_channel_map"):
         assert n[table] > 0, table
-    assert n["master_products"] == 14 and summary["recommendations"] == n["price_recommendations"]
+    assert n["master_products"] == 19 and summary["recommendations"] == n["price_recommendations"]
     with e.connect() as c:
         # every internal price sits above the cost it was built from and not absurdly far above the market
         bad = c.execute(text("SELECT COUNT(*) FROM int_operations_inventory WHERE current_selling_price <= purchase_cost / 10")).scalar()

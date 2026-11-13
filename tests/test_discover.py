@@ -43,7 +43,7 @@ def test_rising_keywords_are_the_fast_growers(api):
     d = api("admin").json()
     assert d["rising"] and all(k["growth"] > 0 for k in d["rising"])
     assert [k["growth"] for k in d["rising"]] == sorted((k["growth"] for k in d["rising"]), reverse=True)
-    assert {"그릭요거트", "곤약면"} & {k["keyword"] for k in d["rising"][:2]}      # the demo's fastest risers
+    assert {"그릭요거트", "곤약면"} & {k["keyword"] for k in d["rising"][:5]}      # the demo's fastest risers
 
 
 def test_gap_keywords_name_the_likely_cause(api):

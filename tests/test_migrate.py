@@ -50,3 +50,19 @@ def test_cli(old_db, tmp_path):
     assert main(["migrate-sqlite", str(old_db), str(tmp_path / "t.duckdb")], settings=s, tp=TP, out=out) == 0
     assert "users: 1" in out.getvalue()
     assert not (tmp_path / "default.duckdb").exists()          # the configured database is untouched
+
+
+def test_duckdb_survives_concurrent_first_connections(tmp_path):
+    """The dashboard fires many requests at once; DuckDB used to fail with 'Unique file handle conflict' (HTTP 500)."""
+    import concurrent.futures as cf
+    from sqlalchemy import text
+    from marketflow.db import init_sqlite, make_engine
+    e = make_engine(f"duckdb:///{tmp_path / 'c.duckdb'}")
+    init_sqlite(e)
+
+    def one(_):
+        with e.connect() as c:
+            return c.execute(text("SELECT COUNT(*) FROM users")).scalar()
+    for _round in range(20):
+        with cf.ThreadPoolExecutor(16) as ex:
+            assert set(ex.map(one, range(32))) == {0}
