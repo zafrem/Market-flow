@@ -1,14 +1,16 @@
 # Software Requirements Specification (SRS)
 ## Project: MarketFlow (Multi-Channel Market Analysis & Dynamic Price Optimization System)
 
-**Document Version:** 1.3  
+**Document Version:** 1.4  
 **Target Environment:** Local Dockerized Sandbox & Cloud Infrastructure  
 **Author/Architect:** Development Team / System Architect  
 **Status:** Draft – revised after review; pricing-strategy defaults (F-04-1) and legal review (F-01-2) pending confirmation  
 
 **Revision note (1.2):** Fixed MySQL partition/FK incompatibility, defined the price recommendation algorithm, added product-matching, self-healing validation, execution-mode/approval, RBAC detail, observability NFRs, and reconciled test thresholds.
 
-**Revision note (1.3):** Adds §4 F-08, which incorporates the revised *Competitor Price & Margin Analysis* functional specification (`docs/경쟁사 가격·마진 분석 시스템 기능 명세서 (수정본).md`): P0/P1/P2 phasing, effective purchase price, dual timestamps, match grades, disposal cost and BEP, alert and approval policy. Current status per item, and where today's behavior conflicts with the spec, is in `docs/GAP_ANALYSIS.md`. Existing sections are unchanged; where F-08 differs from them, F-08 states the target and the conflict is listed in the gap analysis.
+**Revision note (1.4):** Adds §4.1, the implementation status of F-08 (replaces the separate gap analysis document), and solo mode for single-operator use.
+
+**Revision note (1.3):** Adds §4 F-08, which incorporates the revised *Competitor Price & Margin Analysis* functional specification (`docs/경쟁사 가격·마진 분석 시스템 기능 명세서 (수정본).md`): P0/P1/P2 phasing, effective purchase price, dual timestamps, match grades, disposal cost and BEP, alert and approval policy. Existing sections are unchanged; where F-08 differs from them, F-08 states the target. Implementation status and the decisions taken are in §4.1.
 
 ---
 
@@ -244,7 +246,7 @@ Internal cost accounting, warehouse balance, and velocity snapshot.
 * **F-05-3 (Configurable Notification Rules):** Webhook/Slack alert dispatches when margin drops below threshold ($\le 10\%$ default; per category the highest `alert_margin_bep` among active ADMINs and the MDs assigned to it, BUYERs ignored) or stock-out events occur. Alerts are de-duplicated per (rule, item, channel) with a configurable suppression window (default 6h, persisted in `alert_log`), rate-limited, and retried with exponential backoff (max 5 attempts) before landing in a dead-letter log.
 
 ### F-06: Market Intelligence (Category Health + Trend Radar)
-Implemented per `docs/MI_FRAMEWORK.md`. Demand and interest signals (SEARCH, BUYER, SKU, PRODUCT, PROMOTION, MEDIA) are imported from CSV/XLSX (`import-mi`, or admin-only `POST /mi/import`) into `mi_observations` (long format, upsert on signal/period/category/keyword/metric).
+Implemented per `docs/MI_FRAMEWORK.md` (requirements source, Korean). Demand and interest signals (SEARCH, BUYER, SKU, PRODUCT, PROMOTION, MEDIA) are imported from CSV/XLSX (`import-mi`, or admin-only `POST /mi/import`) into `mi_observations` (long format, upsert on signal/period/category/keyword/metric).
 * **F-06-1 (Category Health):** per category, demand direction (GMV, else units sold; recent mean vs prior mean), demand-share shift in percentage points, stock cover from `int_operations_inventory` (TIGHT < 3 days, SURPLUS > 14), and a Search→demand lead test: period-over-period changes correlated at lags 0..2, accepted only above both `lead_min_r` and a one-sided p<0.01 critical value, otherwise search is reported as interest, not demand.
 * **F-06-2 (Trend Radar):** per keyword, a lifecycle stage (SEED / EMERGING / GROWING / MAINSTREAM / FADING) from search growth, volume percentile among at least three peers in its category, and corroboration by PRODUCT / PROMOTION / MEDIA mentions; a weighted score (weights configurable in `[mi.weights]`) and an opportunity score (score × (1 − volume percentile)).
 * **F-06-3 (Presentation and access):** every row carries "what changed / why it matters / what to do". Users see only their assigned `category_l` values; rows without a category are admin-only; no cost data is involved.
@@ -257,7 +259,7 @@ One crawler per data item (`report`, `buyer`, `news`, `competitor`, `flyer`, `ne
 * **F-07-4 (News):** counts articles per ISO week that mention each tracked keyword (latest search keywords plus extras); counts only ever grow so a rolling feed window cannot erase history.
 
 ### F-08: Competitor Price & Margin Analysis (target requirements from the revised functional specification)
-All figures below are the spec's proposed values and must be confirmed before work starts (spec §9). Status per item: `docs/GAP_ANALYSIS.md`.
+All figures below are the spec's proposed values and must be confirmed before work starts (spec §9). Implementation status per requirement: §4.1 below.
 
 **Definitions**
 * **Effective purchase price (실구매가):** shown price − instant discount − public coupon + shipping fee; gift promotions convert to unit price (1+1 = 50% per unit); card/membership-only prices are shown in a separate column. Comparison is on the standard unit price of the effective price.
@@ -274,7 +276,7 @@ All figures below are the spec's proposed values and must be confirmed before wo
 | P1 | Auto-match + review queue; search-log and promotion-ledger links; backfill; point-in-time snapshots; category classifier; synonym dictionary; keyword calculations; search–sales gap diagnosis; alerts; promotion calendar; price change approval | P0 margin within ±0.5 pp of finance; crawl success ≥ 95% for 2 weeks |
 | P2 | Flyer parser; banner/exhibition collection; new-product detection; discount-period anomaly detection; sales response scenarios | Auto-match precision ≥ 95%; ≥ 12 months of backfilled data |
 
-**Requirements** (IDs follow `docs/GAP_ANALYSIS.md`)
+**Requirements** 
 * **F-08-1 Collection and integration**
   * F-08-1.1 Per-source connectors with schedules, read-only accounts, retry and alert; last success time and loaded row count shown; source-to-target row difference ≤ 0.1%.
   * F-08-1.2 Unified schema mapper with versioned rules; unmapped codes listed; unmapped rows excluded from aggregates with their count shown.
@@ -315,6 +317,26 @@ All figures below are the spec's proposed values and must be confirmed before wo
   * F-08-N7 Dashboard availability 99% in business hours; collection failure never blocks reads.
   * F-08-N8 Crawl only legally reviewed targets and methods; no login areas, no personal data; request-rate cap.
 
+
+### 4.1 F-08 implementation status (checked against the code on 2026-11-13)
+**Done** = implemented and covered by tests; **Partial** = part of it exists; **Missing** = not implemented. Nothing here has been run against live services (real KAMIS/Garak/OpenAI/Slack), MySQL, Docker or a real browser; tests use SQLite, fixtures, fake APIs and jsdom.
+
+| Status | Requirements |
+| :--- | :--- |
+| **Done** | **1.4** point-in-time snapshots (occurred vs. ingested time, `cli snapshot`, `/snapshot`) · **1.5** coupon, shipping fee and bonus quantity stored; effective unit price used for comparison · **2.1** match grades, Product matches screen, audited changes · **2.3** confirmed SAME matches only · **2.5** category classifier with `classify-eval` · **2.6** synonym dictionary with impact count and history · **3.2** price-match simulator with expected margin and BEP · **3.3** effective purchase price · **3.6** keyword share with WoW/YoY · **3.7** search–sales gap diagnosis (Search gap tab) · **4.1** comparison sheet with expected margin and BEP, audited CSV export · **4.6** price-change draft → approve → apply with evidence snapshot and (team mode) admin approval below the defense line · **N3** personal-data filter on MI import · **N5** daily quality report and alerts, status strip · **N7** · **N8** |
+| **Partial** | **1.1** ERP data arrives as CSV/XLSX, not a read-only DB connector · **1.2** header aliases and review queue, no rule versioning · **1.3** MI import is an idempotent upsert with line-numbered errors (CLI `--errors-file`); no downloadable failure file in the API, no sales/discount history backfill · **1.6** flyer images are read with the OpenAI API into weekly PROMOTION mentions; no PDF, per-field confidence or side-by-side review · **2.2** unit conversion done, attributes (grade/origin/cut) are not compared · **2.4** auto-match suggestions with a review queue; precision and recall are not measured · **3.1** net margin with disposal cost; the VAT basis and ±0.5 pp finance reconciliation are open · **3.4** per-category minimum margin and audited floor override; no screen for defense lines · **4.2** crawler pages with status, schedule and audited changes; retail target URLs live in `config/extraction.json` · **4.3** Category health, Trend radar and Search gap tabs; no gap quadrant chart · **4.4** promotion calendar (manual entry, 90 days back and 30 ahead); no competitor collection, no year-over-year overlay · **4.5** figure-free alerts, 24 h dedupe, opt-in daily digest; no per-type thresholds · **N1** three roles with category scope; no separable permissions or SSO · **N2** writes and exports are audited; views are not · **N4** secrets in `settings.toml` or the environment; no secret manager · **N6** competitor data older than 24 h is excluded from decisions and crawlers are marked stale after twice their cycle; no per-value staleness mark |
+| **Missing** | **3.5** sales response scenarios · **3.8** new-product detector · **3.9** discount anomaly detection |
+
+**Decisions taken**
+* Alerts carry no cost, margin or price figures, only a link (`[server] public_url`).
+* Only human-confirmed SAME matches count toward recommendations, the matrix and alerts.
+* The engine stays advisory: no write-back to sales channels; F-04-0 auto-apply is out of scope.
+* Solo mode (`[approval] solo_mode`, default on): one person may approve their own proposals, including below the defense line (still flagged and audited). Team mode (`false`) enforces author ≠ approver and admin approval below the line.
+
+**Still open (needs a business answer)**
+* VAT basis: the spec divides by the selling price and leaves VAT open; the engine divides by the VAT-exclusive price, so rates differ by about 10% relative until one basis is fixed.
+* Collection cadence: the spec wants core SKUs hourly; retail runs at 08:00, 13:00 and 19:00 KST (hourly raises load and the legal review burden per platform).
+* Disposal-cost source, minimum margins per category, whether card or membership prices count, and the first category and scale (spec §9).
 
 ---
 
@@ -428,5 +450,5 @@ To ensure the system can be validated automatically by an individual developer, 
   * FastAPI query service and personalized Watchlist API endpoints.
   * Responsive Three-Way Comparison Matrix Dashboard UI.
   * End-to-end sandbox verification and containerized deployment dry run.
-* **Phase 5: Competitor Price & Margin Analysis per F-08 (see `docs/GAP_ANALYSIS.md` §8 for the order)**
-  * Resolve spec §9 open items; P0 definition fixes (disposal cost, BEP, alert text, confirmed-SAME rule); effective-price fields and comparison-sheet columns; defense-line and matching screens; dual timestamps; then P1 and P2 in spec order.
+* **Phase 5: Competitor Price & Margin Analysis per F-08 (status: §4.1)**
+  * P0 and P1 are implemented (see §4.1 for the exact status). Remaining: the spec §9 open items (VAT basis, finance reconciliation, disposal-cost source), then the P2 items.

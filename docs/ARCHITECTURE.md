@@ -43,6 +43,8 @@ Three deployable pieces share one database. There is no message broker and no ca
 | `scheduler.py`, `schedule.py` | KST slot arithmetic (`latest_slot`) and the `decide` job. |
 | `notify.py` | Alert construction, dedupe, retry, dead letter. |
 | `web/` | `app.py` (routes), `repo.py` (read models), `security.py` (hashing, JWT, throttle), `static/` (dashboard: `index.html`, `app.js`, `i18n.js`, `style.css`). |
+| `matching.py`, `promotions.py`, `quality.py`, `snapshot.py`, `vision.py` | Match grading (audited), promotion calendar, daily data-quality report and alerts, point-in-time snapshots (occurred vs. ingested time), flyer reading through the OpenAI API. |
+| `mi/` (more) | `privacy.py` (personal-data filter on import), `classify.py` (category classifier), `gap.py` (search–sales gap diagnosis), synonym dictionary in `store.py`. |
 | `time_provider.py` | Injectable clock; all business logic takes a `TimeProvider`, so tests run on a fixed time. |
 
 ## 3. Data model
@@ -53,11 +55,12 @@ Defined in `db/init/001_schema.sql`.
 |---|---|---|
 | Catalog | `master_products`, `master_product_aliases`, `product_channel_map` | `std_item_id` is the join key across all sources. |
 | Market data | `ext_public_benchmarks`, `ext_retail_prices` | Time-partitioned on MySQL (`partitions.py` keeps future partitions created). |
-| Internal | `int_operations_inventory` | ERP import: stock, cost, price. Cost data never reaches BUYER responses. |
-| Decisions | `price_recommendations` | Status: PENDING → APPROVED → APPLIED, or SUPPRESSED / REJECTED / REVERTED. |
+| Internal | `int_operations_inventory`, `inventory_revisions` | ERP import: stock, cost, price. Every load also appends a revision stamped with its ingestion time. Cost data never reaches BUYER responses. |
+| Decisions | `price_recommendations` | Status: PENDING → APPROVED → APPLIED, or SUPPRESSED / REJECTED / REVERTED. Person-made proposals (drafts) carry an evidence snapshot in `flags`. |
 | Operations | `review_queue`, `alert_log`, `selector_candidates`, `audit_log` | Review items and alerts are de-duplicated. |
 | Access | `users`, `user_category_assignments`, `user_watchlists`, `user_preferences` | |
 | Market intelligence | `mi_observations` | Long format: `signal_type`, `period_start`, `category_l`, `keyword`, `metric`, `value`, `source`; unique on that key. |
+| Keywords and calendar | `mi_synonyms`, `promotions` | Synonym dictionary with history; promotion calendar (informational). |
 | Crawlers | `crawler_settings`, `crawler_runs` | Settings (enabled, KST times, JSON config, `last_slot`); run history with status and `rows_loaded`. |
 
 ## 4. Main flows
@@ -65,8 +68,8 @@ Defined in `db/init/001_schema.sql`.
 ### 4.1 Price recommendation
 1. Collectors and retail crawlers write benchmarks and competitor prices (matched to `std_item_id` by the title parser; unmatched titles go to `review_queue`).
 2. `import-erp` loads inventory and cost.
-3. The `decide` job (also `cli decide`) evaluates each inventory row: floor from target margin and VAT, match or undercut the lowest competitor, cap the move per run (`max_step_pct`), apply a cooldown, hold price cuts while wholesale is rising, markdown for spoilage risk. The result is a `price_recommendations` row with a reason code and flags, or `SUPPRESSED` with the reason.
-4. An MD/ADMIN approves; `apply` updates the internal ledger. **Nothing is written back to a sales channel**: the engine is advisory. `export-prices` produces the change list.
+3. Only competitor listings a person confirmed as SAME count (`product_channel_map.reviewed_at`); the simulator adds expected margin and break-even volume at the matched effective price. The `decide` job (also `cli decide`) evaluates each inventory row: floor from target margin and VAT, match or undercut the lowest competitor, cap the move per run (`max_step_pct`), apply a cooldown, hold price cuts while wholesale is rising, markdown for spoilage risk. The result is a `price_recommendations` row with a reason code and flags, or `SUPPRESSED` with the reason.
+4. An MD/ADMIN approves (solo mode: the proposer may approve their own; team mode: author ≠ approver, and below the margin defense line an ADMIN); `apply` updates the internal ledger. **Nothing is written back to a sales channel**: the engine is advisory. `export-prices` produces the change list.
 5. Each transition is an atomic status update (compare-and-set) and writes `audit_log`.
 
 ### 4.2 Crawlers
@@ -95,7 +98,9 @@ Defined in `db/init/001_schema.sql`.
 | Outbound fetches | News feed URLs must be http(s) and not localhost, `.local`, `.internal`, or private/loopback/link-local IPs. XML parsed with `defusedxml`. Retail scraping requires a recorded `legal_review_ref`. |
 | File input | Inbox ignores symlinks, 20 MB cap; API upload 5 MB (MI import 5 MB); client-supplied filenames are never used on disk. |
 | LLM | Page text is sanitized before it is sent; returned selectors are validated against the page and held as `PENDING` until a person approves them. |
-| Alerts | Scraped text is escaped (no `@channel`). Alert text contains margins: use a restricted channel. |
+| Alerts | Scraped text is escaped (no `@channel`). Alert text carries no price, margin or cost figures, only SKU, situation and a dashboard link. |
+| Vision (OpenAI) | Images leave the machine only while the flyer crawler is enabled and a key is set; type checked from bytes, 5 MB cap, output validated, personal data dropped, key and response bodies never logged. |
+| Approval | `[approval] solo_mode` (default true) lets a single operator approve their own proposals; `false` enforces author ≠ approver and admin approval below the defense line. Both are audited. |
 | Audit | Approve/reject/apply/revert, user and crawler changes, uploads and imports write `audit_log`. |
 
 ## 6. Time and scheduling
@@ -119,10 +124,10 @@ The dashboard is bilingual (English / Korean): static `data-i18n` attributes plu
 
 ## 9. Known limits and extension points
 
-- The revised price/margin functional specification (SRS F-08) is only partly implemented; see [GAP_ANALYSIS.md](GAP_ANALYSIS.md) for what is missing and which behaviors conflict with it.
+- The revised price/margin functional specification (SRS F-08): P0 and P1 are implemented; what is partial or missing is listed in [SRS.md](SRS.md) §4.1.
 - The worker is single-instance by design; the login throttle is per process.
 - Hive and Power BI have no direct connector (file inbox); the Kurly new-product collection happens outside MarketFlow and feed the inbox.
-- Not verified in CI: the Docker images, live KAMIS/Garak/Gemini/Slack, real RSS feeds, and the dashboard in a real browser.
+- Not verified in CI: the Docker images, MySQL SQL for newer tables, live KAMIS/Garak/Gemini/OpenAI/Slack, real RSS feeds, and the dashboard in a real browser.
 - To add a data source: implement a `Crawler` in `crawlers/adapters.py`, register it in `CrawlerService.registry` (with its `ORDER` position), add translations for its labels in `web/static/i18n.js`, and add a test in `tests/test_crawlers.py`.
 - To add a pricing rule: extend `decision/engine.py`, give it a reason code, and add the code to `i18n.js`.
 - To add a channel write-back: implement it behind `apply` in `decision/service.py` with its own audit action; it does not exist today.

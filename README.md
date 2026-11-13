@@ -1,3 +1,14 @@
+# MarketFlow
+
+Multi-channel market analysis and price recommendations for retail operators and MDs: public wholesale prices, competitor retail prices, your own cost and inventory, and imported search/demand signals go in; price proposals that a person approves come out. The system is advisory: it never writes prices to a sales channel.
+
+| Document | What it is for |
+|---|---|
+| [docs/SRS.md](docs/SRS.md) | Requirements, and the implementation status of the price/margin specification (§4.1) |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How the pieces fit: processes, code layout, data model, flows, security |
+| [docs/PLAYBOOK.md](docs/PLAYBOOK.md) | Setup, daily operations, troubleshooting, backup, incidents |
+| [docs/MI_FRAMEWORK.md](docs/MI_FRAMEWORK.md) | Market-intelligence requirements as received (Korean) |
+
 
 ## Run locally (no Docker, SQLite)
 
@@ -78,7 +89,7 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"      # put the outp
 - **If we match**: the matrix and every recommendation show the expected margin at the competitor's effective price and the weekly break-even volume (`weekly units x margin now / margin then`; "no margin at that price" when the cut leaves nothing).
 - **Export**: dashboard > Comparison matrix > Export comparison (CSV), or `GET /matrix/export` (MD/ADMIN, audited as `MATRIX_EXPORTED`).
 - **Alerts carry no cost, margin or price figures**, only the SKU, the situation and a link (`[server] public_url`). One alert per SKU and type per 24 h.
-- Upgrading an existing MySQL: run `db/migrations/002_price_margin_p0.sql` once (SQLite adds the columns by itself).
+- Upgrading an existing MySQL: apply `db/migrations/002` to `005` in order (price/margin columns, keyword tables, inventory revisions, promotions). SQLite adds missing tables and columns by itself.
 
 ## Vision (ChatGPT / OpenAI API)
 Competitor flyers and banners are read with the OpenAI API. Put the key in `config/settings.toml` under `[vision] openai_api_key` (file mode 600, git-ignored) or in the environment as `OPENAI_API_KEY` (optionally `OPENAI_MODEL`, default `gpt-4o-mini`; use any vision-capable model on your account). In Docker, set `OPENAI_API_KEY` in `.env`. `python -m marketflow.worker --check` prints `vision_enabled=True/False` and never prints the key.
@@ -121,10 +132,10 @@ File crawlers read `data/inbox/<id>/*.csv|xlsx` (`[crawlers] inbox_dir`), move e
 ```
 
 - **Alerts** go to `[alerts] webhook_url` (Slack-compatible): reverse-margin, spoilage, low margin, competitor stock-out,
-  failed jobs/collectors, escalated selector faults, new selector candidates. Each key is sent at most once per 6 h, retried
+  failed jobs/collectors, escalated selector faults, new selector candidates. Each key is sent at most once per 24 h, retried
   with backoff (1, 2, 4, 8 s), then dead-lettered in `alert_log`; at most 20 per run (the rest become one summary).
-  Scraped text is escaped so it cannot trigger `@channel`-style mentions. The alert text includes margin figures, so use a
-  channel only MD/ADMIN can read. Test it with `python -m marketflow.cli alert-test`.
+  Scraped text is escaped so it cannot trigger `@channel`-style mentions. Alert text carries no price, margin or cost
+  figures (only SKU, situation and a link). Test it with `python -m marketflow.cli alert-test`.
 - **Review queue**: titles that could not be matched/parsed, quarantined LLM records and unmapped benchmark items are stored
   (de-duplicated) instead of only logged. `cli review` / `resolve ID`, or `GET /review`, `POST /review/{id}/resolve`.
 - **Selector candidates**: when the LLM heals a page, the verified replacement selectors are saved as `PENDING`.

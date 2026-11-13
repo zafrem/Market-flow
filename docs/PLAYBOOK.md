@@ -32,7 +32,7 @@ Rules to explain to users: buyers never see cost or margin; MDs can approve and 
 ## 3. Daily operations
 
 ### 3.1 Morning check (about 5 minutes, admin)
-1. **Crawlers tab**: every enabled crawler should show a recent OK run and a fresh data date. FAILED or stale rows: see §6.
+1. **Status strip above the comparison matrix** (and `cli quality`): one chip per crawler (fresh, stale, low success) plus counts of unconfirmed matches, matches to re-check and unreadable titles. **Crawlers tab**: every enabled crawler should show a recent OK run and a fresh data date. FAILED or stale rows: see §6.
 2. **Review queue** (`cli review` or dashboard): resolve unmatched titles and unmapped benchmark items (§4.2).
 3. **Selector candidates** (`cli selectors`): approve or ignore healed selectors (§4.3).
 4. **Recommendations**: MDs work through PENDING items (§3.2).
@@ -46,8 +46,14 @@ Rules to explain to users: buyers never see cost or margin; MDs can approve and 
 5. Applying updates the internal ledger only. Export the change list for the channel team: `cli export-prices --since 2026-11-01 --file changes.csv`. Push the prices to the sales channel yourself.
 6. Mistake? `cli revert ID --as kim:MD` (audited).
 
+### 3.2a Proposing a price yourself, and solo use
+On a matrix row press **Propose price**: enter a price and a reason. The proposal stores an evidence snapshot (cost, competitor prices, data times). One person running the system alone (default `[approval] solo_mode = true`) may approve and apply their own proposal, including one below the margin defense line (it stays flagged and audited). For a team set `solo_mode = false`: authors cannot approve their own proposals and below-line proposals need an ADMIN. To see what was known on a past date: `cli snapshot YYYY-MM-DD` (as known now) or with `--known-at <UTC time>` (what the system knew then).
+
+### 3.2b Promotions
+Dashboard > Promotions: record campaigns (name, period, category, channel, discount) so a jump in searches or sales is read against them. They do not change prices. Recording one for every category is admin-only.
+
 ### 3.3 Market intelligence (weekly or monthly)
-1. Get the data: search report (Hive export) → `report` crawler; Power BI monthly export → `buyer`; flyer images (PNG/JPEG/WebP, read with the OpenAI API) or OCR output (CSV) → `flyer`; new-product list → `newproduct`.
+1. Get the data: search report (Hive export) → `report` crawler; Power BI monthly export → `buyer`; flyer images (PNG/JPEG/WebP; each image is sent to OpenAI, needs a key) or a CSV → `flyer`; new-product list → `newproduct`.
 2. Drop the CSV/XLSX in `data/inbox/<crawler>/` or upload on that crawler's page. One row per period (and optionally category and keyword); other numeric columns become metrics. Accepted periods: `2026-10-26`, `20261026`, `202610`, `2026-W43`. Re-importing a period overwrites it.
 3. Direct import is also available: `cli import-mi file.csv --type SEARCH|BUYER|SKU|PRODUCT|PROMOTION|MEDIA`.
 4. Read the result: dashboard tabs *Category health* and *Trend radar*, or `cli mi-report --lang ko`.
@@ -75,13 +81,13 @@ Edit `[decision]` (per category: `[decision.Fresh]`) or `[mi]` / `[mi.weights]` 
 
 ### 4.6 Configure alerts
 Alert text names the SKU and the situation but never prices, margins or costs (SRS F-08-4.5); set `[server] public_url` so alerts link to the dashboard. The channel no longer needs to be restricted for margin reasons, but keep it internal.
-Set `[alerts] webhook_url` to a Slack-compatible webhook for a restricted channel (alerts include margins). Test: `cli alert-test`. Each alert key is sent at most once per 6 h, retried with backoff, then dead-lettered in `alert_log`; at most 20 per run.
+Set `[alerts] webhook_url` to a Slack-compatible webhook. Test: `cli alert-test`. Each alert key is sent at most once per 24 h, retried with backoff, then dead-lettered in `alert_log`; at most 20 per run. With `[alerts] digest = true` everything below RED goes out as one summary per run; RED alerts stay individual. Data-quality alerts (`DATA_QUALITY:*`) come from the same run; thresholds are in `[quality]`.
 
 ## 5. Deploy and upgrade
 
 1. Take a backup first (§7).
 2. `git pull`; run `.venv/bin/pytest` (and `cd tests/js && npm test` if the dashboard changed).
-3. Docker: `docker compose up --build -d`. Schema files in `db/init/*.sql` run only on an **empty** data directory. For an existing MySQL apply the files in `db/migrations/` in order (`002_price_margin_p0.sql` adds the effective-price, disposal and match-grade columns); new tables can be created from the `CREATE TABLE IF NOT EXISTS` statements in `db/init/001_schema.sql`. SQLite adds missing tables and columns on start.
+3. Docker: `docker compose up --build -d`. Schema files in `db/init/*.sql` run only on an **empty** data directory. For an existing MySQL apply the files in `db/migrations/` in order (`002` price/margin columns, `003` keyword tables, `004` inventory revision history, `005` promotions); new tables can be created from the `CREATE TABLE IF NOT EXISTS` statements in `db/init/001_schema.sql`. SQLite adds missing tables and columns on start.
 4. Check `docker compose logs collector-worker backend-api` for errors, then the Crawlers tab for the next slot.
 5. Rollback: previous image/commit, restore the backup if the schema changed.
 
@@ -119,7 +125,7 @@ If you change the schema, edit `scripts/gen_schema.py` and regenerate `db/init/0
 - The OpenAI key (`[vision] openai_api_key` / `OPENAI_API_KEY`) is a paid credential: keep it only in `settings.toml` (mode 600) or `.env`, rotate it in the OpenAI console after any suspected leak, and set a spend limit there.
 - Rotate `jwt_secret` after any suspected leak (all users must log in again); rotate KAMIS/Garak/Gemini keys and the webhook URL in `settings.toml`, never in the repo (`config/settings.toml` is git-ignored).
 - Quarterly: review active users and category assignments; review `cli audit` (or `GET /admin/audit`) for unexpected approvals or crawler changes.
-- Keep the alert channel restricted to MD/ADMIN.
+- Keep the alert channel internal. Alerts carry no figures, but they name SKUs and situations.
 - Do not enable a retail `SCRAPE` connector before the ToS/legal review is recorded in `legal_review_ref`.
 - Do not put feeds or credentials into crawler settings that you would not want in the audit trail.
 

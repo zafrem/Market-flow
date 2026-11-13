@@ -85,4 +85,6 @@ MarketFlow 안의 모듈(`src/marketflow/mi/`)로 구현했습니다. 사용법�
 | Open Question 4 (신호 가중치) | `[mi.weights]` 설정으로 조정 |
 | 데이터 입력 | CSV/XLSX 임포트 (`import-mi`, 관리자용 `POST /mi/import`). Hive/Power BI 직접 연동은 하지 않음 |
 
-미구현: 뉴스 자동 수집, 전단 OCR, 컬리 신규상품 크롤링 연동(이들은 CSV로 PRODUCT/PROMOTION/MEDIA 신호를 넣는 방식으로 대체), Opportunity Radar 전용 화면(기회 점수 정렬로 대체).
+이후 추가된 것: 뉴스 자동 수집(`news` 크롤러, RSS/Atom), 전단 이미지 읽기(`flyer` 크롤러, OpenAI API), 개인정보 필터, 카테고리 분류기, 동의어 사전, 전주·전년 대비, 검색-구매 간극 진단(Search gap 탭), 프로모션 캘린더.
+
+미구현: 컬리 신규상품 크롤링 연동(CSV로 PRODUCT 신호를 넣는 방식으로 대체), Opportunity Radar 전용 화면(기회 점수 정렬로 대체).
