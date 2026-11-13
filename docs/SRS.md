@@ -1,454 +1,455 @@
-# Software Requirements Specification (SRS)
-## Project: MarketFlow (Multi-Channel Market Analysis & Dynamic Price Optimization System)
+# 소프트웨어 요구사항 명세서 (SRS)
+## 프로젝트: MarketFlow (멀티채널 시장 분석 및 동적 가격 최적화 시스템)
 
-**Document Version:** 1.4  
-**Target Environment:** Local Dockerized Sandbox & Cloud Infrastructure  
-**Author/Architect:** Development Team / System Architect  
-**Status:** Draft – revised after review; pricing-strategy defaults (F-04-1) and legal review (F-01-2) pending confirmation  
+**문서 버전:** 1.4  
+**대상 환경:** 로컬 Docker 샌드박스 및 클라우드 인프라  
+**작성자/설계자:** 개발팀 / 시스템 설계자  
+**상태:** 초안 – 검토 후 개정. 가격 전략 기본값(F-04-1)과 법무 검토(F-01-2)는 확정 대기 중  
 
-**Revision note (1.2):** Fixed MySQL partition/FK incompatibility, defined the price recommendation algorithm, added product-matching, self-healing validation, execution-mode/approval, RBAC detail, observability NFRs, and reconciled test thresholds.
+**개정 노트 (1.2):** MySQL 파티션/FK 비호환을 고치고, 가격 추천 알고리즘을 정의했으며, 상품 매칭, 자가 복구 검증, 실행 모드/승인, RBAC 상세, 관측성 비기능 요구, 조정된 테스트 임계값을 추가했습니다.
 
-**Revision note (1.4):** P2 items implemented (flyer review, sales scenarios, new products, discount anomalies). Adds §4.1, the implementation status of F-08 (replaces the separate gap analysis document), and solo mode for single-operator use.
+**개정 노트 (1.3):** §4에 F-08을 추가해 개정된 *경쟁사 가격·마진 분석* 기능 명세서(저장소에서 삭제되었으며 git 이력에 있음)를 반영했습니다: P0/P1/P2 단계, 실구매가, 이중 타임스탬프, 매칭 등급, 폐기비와 BEP, 알림과 승인 정책. 기존 절은 그대로이며, F-08이 기존 절과 다른 곳에서는 F-08이 목표를 정합니다. 구현 현황과 내린 결정은 §4.1에 있습니다.
 
-**Revision note (1.3):** Adds §4 F-08, which incorporates the revised *Competitor Price & Margin Analysis* functional specification (`docs/경쟁사 가격·마진 분석 시스템 기능 명세서 (수정본).md`): P0/P1/P2 phasing, effective purchase price, dual timestamps, match grades, disposal cost and BEP, alert and approval policy. Existing sections are unchanged; where F-08 differs from them, F-08 states the target. Implementation status and the decisions taken are in §4.1.
-
----
-
-## 1. Introduction & Executive Summary
-
-### 1.1 Purpose
-MarketFlow is an automated, data-driven decision-execution platform engineered for retail operators, category managers (MDs), and marketplace sellers. Its core mission is to safeguard gross margins, prevent stock-out or write-off losses, and maximize inventory turnover. 
-
-The system continuously acquires, normalizes, and reconciles:
-1. **External Public Benchmarks:** Wholesale auction prices (KAMIS, Garak Market), consumer inflation monitors (KCA Price), and customs clearance statistics.
-2. **External Retail Channels:** Live consumer listings, promotions, and stock levels across major e-commerce platforms (Coupang, Market Kurly, SSG, B-Mart, Oasis, Naver Smartstore).
-3. **Internal Operational Datasets:** Landed cost of goods sold (COGS), variable packaging, cold-chain fulfillment, channel commission rates, real-time inventory levels, and shelf-life / shelf-aging metrics.
-
-The platform executes dynamic price optimization, allocates liquidation channels, prevents negative gross margins (*reverse margins*), and detects supply vacuums.
-
-### 1.2 Core Architectural Principles
-* **Extensible Core + Domain Plugin Architecture:** The core engine is agnostic to product categories. Domain-specific business logic is implemented via decoupled plugins:
-  * **Fresh Produce Plugin (Phase 1 Baseline):** Daily wholesale auction settlement indexing, $100\text{g}$ base conversion, shelf-life ($D\text{-Day}$) decay guard, and regional early-morning delivery zones.
-  * **Packaged / Ambient Food & Household Plugin (Extension):** GTIN/EAN-13 barcode reconciliation, bundle/multipack price decomposition, holding-cost escalation monitoring.
-  * **Imported Raw Materials Plugin (Extension):** Harmonized System (HS) code-level customs tariff and clearance tracking, real-time FX hedging calculation.
-* **First-Class Testability & Verifiability:** Every component—from scraper pipelines to calculation algorithms—must expose deterministic entry points, test fixture injection interfaces, and mock harnesses to guarantee testability across unit, integration, and E2E tiers.
+**개정 노트 (1.4):** P2 항목(전단 검토, 판매 시나리오, 신상품, 할인 이상 탐지)을 구현했습니다. F-08의 구현 현황인 §4.1을 추가했고(별도 갭 분석 문서를 대체), 혼자 운영하는 경우를 위한 혼자 쓰기 모드를 추가했습니다.
 
 ---
 
-## 2. System Architecture & Infrastructure
+## 1. 소개 및 요약
 
-### 2.1 Component Interaction Pipeline
+### 1.1 목적
+MarketFlow는 소매 운영자, 카테고리 담당자(MD), 마켓플레이스 판매자를 위해 만든 자동화된 데이터 기반 의사결정 실행 플랫폼입니다. 핵심 사명은 매출총이익을 지키고, 품절이나 폐기 손실을 막고, 재고 회전을 극대화하는 것입니다.
+
+시스템은 다음을 계속 수집, 정규화, 대조합니다.
+1. **외부 공개 벤치마크:** 도매시장 경매가(KAMIS, 가락시장), 소비자 물가 모니터(KCA Price), 통관 통계.
+2. **외부 소매 채널:** 주요 이커머스 플랫폼(쿠팡, 마켓컬리, SSG, B마트, 오아시스, 네이버 스마트스토어)의 실시간 상품, 프로모션, 재고 상태.
+3. **내부 운영 데이터:** 도착 원가(COGS), 변동 포장비, 콜드체인 풀필먼트 비용, 채널 수수료율, 실시간 재고, 소비기한/숙성 지표.
+
+플랫폼은 동적 가격 최적화를 수행하고, 소진 채널을 배분하고, 마이너스 매출총이익(*역마진*)을 막고, 공급 공백을 탐지합니다.
+
+### 1.2 핵심 아키텍처 원칙
+* **확장 가능한 코어 + 도메인 플러그인 구조:** 코어 엔진은 상품 카테고리에 구애받지 않습니다. 도메인별 비즈니스 로직은 분리된 플러그인으로 구현합니다.
+  * **신선식품 플러그인(1단계 기준):** 일별 도매 경매 정산 지수화, $100\text{g}$ 기준 환산, 소비기한($D\text{-Day}$) 감쇠 보호, 지역별 새벽 배송권.
+  * **포장/상온 식품 및 생활용품 플러그인(확장):** GTIN/EAN-13 바코드 대조, 번들/멀티팩 가격 분해, 보관비 상승 모니터링.
+  * **수입 원자재 플러그인(확장):** HS 코드 단위 관세 및 통관 추적, 실시간 환헤지 계산.
+* **일급 테스트 용이성과 검증 가능성:** 스크래퍼 파이프라인부터 계산 알고리즘까지 모든 구성 요소가 결정적인 진입점, 테스트 픽스처 주입 인터페이스, 목 하네스를 제공해 단위, 통합, E2E 계층의 테스트를 보장해야 합니다.
+
+---
+
+## 2. 시스템 아키텍처 및 인프라
+
+### 2.1 구성 요소 상호작용 파이프라인
 
 ```
 +---------------------------------------------------------------------------------+
-|                                External Ingestion                               |
+|                                외부 수집 (Ingestion)                              |
 |  +------------------------+  +--------------------------+  +-----------------+  |
-|  | Public Benchmark APIs  |  | External Marketplaces    |  | Internal Data   |  |
-|  | (KAMIS, Garak, Customs)|  | (Coupang, Kurly, SSG...) |  | (WMS, ERP, CSV) |  |
+|  | 공개 벤치마크 API        |  | 외부 마켓플레이스          |  | 내부 데이터       |  |
+|  | (KAMIS, 가락, 관세)      |  | (쿠팡, 컬리, SSG...)      |  | (WMS, ERP, CSV) |  |
 |  +-----------+------------+  +------------+-------------+  +--------+--------+  |
 +--------------|----------------------------|-------------------------|-----------+
                v                            v                         v
 +---------------------------------------------------------------------------------+
-|                       MarketFlow Core Ingestion Worker                          |
+|                       MarketFlow 코어 수집 워커                                    |
 |  +---------------------------------------------------------------------------+  |
-|  | Multi-Source Pipeline (Python Asyncio / Playwright)                       |  |
-|  |  - Human-Like Browser Navigation (Typing jitter, randomized mouse scroll)  |  |
-|  |  - Anti-Bot Mitigation (Stealth plugins, residential IP rotation hooks)   |  |
+|  | 멀티 소스 파이프라인 (Python Asyncio / Playwright)                          |  |
+|  |  - 사람 같은 브라우저 탐색 (타이핑 지터, 무작위 마우스 스크롤)                  |  |
+|  |  - 봇 탐지 완화 (스텔스 플러그인, 주거용 IP 교체 훅)                          |  |
 |  +-------------------------------------+-------------------------------------+  |
 |                                        v                                        |
 |  +---------------------------------------------------------------------------+  |
-|  | Self-Healing Module (AI Fallback)                                         |  |
-|  |  - DOM change & extraction failure detection (NULL checks / Thresholds)   |  |
-|  |  - Sanitized Markdown distillation -> Lightweight LLM (Gemini Flash)     |  |
-|  |  - Schema-enforced JSON extraction & selector regeneration suggestion     |  |
+|  | 자가 복구 모듈 (AI 대체 경로)                                               |  |
+|  |  - DOM 변경 및 추출 실패 탐지 (NULL 검사 / 임계값)                           |  |
+|  |  - 정제된 마크다운 증류 -> 경량 LLM (Gemini Flash)                          |  |
+|  |  - 스키마 강제 JSON 추출 및 셀렉터 재생성 제안                                |  |
 |  +-------------------------------------+-------------------------------------+  |
 |                                        v                                        |
 |  +---------------------------------------------------------------------------+  |
-|  | Normalization & Unit Parsing Engine                                       |  |
-|  |  - Regex / Heuristic unit decomposition (e.g., 1.2kg -> 100g standard unit)  |  |
+|  | 정규화 및 단위 파싱 엔진                                                    |  |
+|  |  - 정규식 / 휴리스틱 단위 분해 (예: 1.2kg -> 100g 표준 단위)                   |  |
 |  +-------------------------------------+-------------------------------------+  |
 |                                        v                                        |
 |  +---------------------------------------------------------------------------+  |
-|  | Decision & Execution Engine                                               |  |
-|  |  - Net Margin Calculation, Run-rate, Expiry risk vs D-Day, Floor guarding |  |
+|  | 의사결정 및 실행 엔진                                                       |  |
+|  |  - 순마진 계산, 런레이트, 소비기한(D-Day) 대비 위험, 바닥가 보호              |  |
 |  +---------------------------------------------------------------------------+  |
 +----------------------------------------|----------------------------------------+
                                          v
 +---------------------------------------------------------------------------------+
-|                          Persistence Tier (MySQL 8.0)                           |
-|  - Range-Partitioned Time-Series Tables (Benchmark, Scraped, Operations)        |
-|  - Master Catalog & Normalized SKU Entities                                     |
+|                          영속 계층 (MySQL 8.0)                                    |
+|  - 범위 파티션 시계열 테이블 (벤치마크, 수집, 운영)                                  |
+|  - 마스터 카탈로그와 정규화된 SKU 엔티티                                            |
 +----------------------------------------|----------------------------------------+
                                          v
 +---------------------------------------------------------------------------------+
-|                     Presentation & API Tier (FastAPI + UI)                      |
-|  - Matrix comparison view ([Benchmark] vs [Internal Cost] vs [Competitor])      |
-|  - User watchlists & role-based rule alerts (Slack / Webhook / Toast)           |
-|  - Deterministic Mock / Replay Test Harness Endpoint                            |
+|                     표현 및 API 계층 (FastAPI + UI)                               |
+|  - 매트릭스 비교 화면 ([벤치마크] 대 [내부 원가] 대 [경쟁사])                         |
+|  - 사용자 관심 목록과 역할 기반 규칙 알림 (Slack / 웹훅 / 토스트)                    |
+|  - 결정적 목/리플레이 테스트 하네스 엔드포인트                                       |
 +---------------------------------------------------------------------------------+
 ```
 
-### 2.2 Infrastructure & Deployment
-* **Containerization:** The entire topology is orchestrated via a unified `docker-compose.yml` comprising:
-  * `db`: MySQL 8.0 with dedicated volume binding (`./mysql_data:/var/lib/mysql`) for state persistence.
-  * `collector-worker`: Python 3.11+ asynchronous batch & scraping service with Playwright.
-  * `backend-api`: FastAPI REST service exposing decision outputs and simulation endpoints.
-  * `frontend`: Single-page responsive operations dashboard.
-  * `mock-server` (test profile only): WireMock / static-fixture server for scraper transport tests.
-* **Time Zone Policy:** All `DATETIME` columns are stored in **UTC**. Cron schedules and business-day boundaries are defined in `Asia/Seoul` (KST) and converted at the application layer. `DATE` columns (`recorded_date`) represent the KST calendar date.
-* **Configuration & Security:** All secrets, platform credentials, and API keys are strictly injected through `.env` runtime files and decoupled from Git tracking.
+### 2.2 인프라 및 배포
+* **컨테이너화:** 전체 구성은 하나의 `docker-compose.yml`로 구성합니다.
+  * `db`: 상태 유지를 위해 전용 볼륨(`./mysql_data:/var/lib/mysql`)을 붙인 MySQL 8.0.
+  * `collector-worker`: Playwright를 쓰는 Python 3.11+ 비동기 배치 및 스크래핑 서비스.
+  * `backend-api`: 의사결정 결과와 시뮬레이션 엔드포인트를 제공하는 FastAPI REST 서비스.
+  * `frontend`: 단일 페이지 반응형 운영 대시보드.
+  * `mock-server`(테스트 프로파일 전용): 스크래퍼 전송 테스트용 WireMock / 정적 픽스처 서버.
+* **시간대 정책:** 모든 `DATETIME` 열은 **UTC**로 저장합니다. 크론 일정과 영업일 경계는 `Asia/Seoul`(KST)로 정의하고 애플리케이션 계층에서 변환합니다. `DATE` 열(`recorded_date`)은 KST 달력 날짜를 뜻합니다.
+* **설정과 보안:** 모든 비밀 값, 플랫폼 자격 증명, API 키는 `.env` 런타임 파일로만 주입하고 Git 추적에서 분리합니다.
 
 ---
 
-## 3. Comprehensive Data Model (Database Schema)
+## 3. 종합 데이터 모델 (데이터베이스 스키마)
 
-> **Schema note (MySQL constraint):** MySQL/InnoDB does **not** support foreign keys on partitioned tables. Columns marked `FK*` below are *logical* references to `master_products`; referential integrity for the three partitioned tables is enforced in the repository layer (validated on write, plus a nightly orphan-check job). Non-partitioned tables use real FKs. All money arithmetic uses `Decimal` (never binary floats).
+> **스키마 참고(MySQL 제약):** MySQL/InnoDB는 파티션 테이블에 외래 키를 **지원하지 않습니다**. 아래에서 `FK*`로 표시한 열은 `master_products`에 대한 *논리적* 참조이며, 파티션 테이블 세 개의 참조 무결성은 리포지토리 계층에서(쓰기 때 검증하고 야간 고아 검사 작업으로) 보장합니다. 파티션되지 않은 테이블은 실제 FK를 씁니다. 모든 금액 계산은 `Decimal`을 쓰며 이진 부동소수점은 쓰지 않습니다.
 
-### 3.1 Master Catalog (`master_products`)
-Represents the normalized anchor for all cross-channel matching.
+### 3.1 마스터 카탈로그 (`master_products`)
+채널 간 매칭의 정규화된 기준점입니다.
 
-| Column Name | Logical Name | Data Type | Constraints | Description |
+| 열 이름 | 논리 이름 | 데이터 타입 | 제약 | 설명 |
 | :--- | :--- | :--- | :--- | :--- |
-| `std_item_id` | Standard Product ID | `INT` | `PK, AUTO_INCREMENT` | Unique system identifier |
-| `category_l` | Category Large | `VARCHAR(50)` | `NOT NULL` | Fresh, Ambient, Household, etc. |
-| `category_m` | Category Medium | `VARCHAR(50)` | `NOT NULL` | Fruit, Meat, Detergent, Seasoning |
-| `item_name` | Canonical Item Name | `VARCHAR(100)` | `NOT NULL` | Standard name (e.g., Apple, Onion) |
-| `standard_unit` | Standard Metric Unit | `VARCHAR(20)` | `NOT NULL` | Canonical base: `100g`, `1kg`, `100ml`, `1unit` (rolls, sheets, pieces map to `1unit`) |
-| `barcode` | Global Barcode | `VARCHAR(50)` | `UNIQUE, NULLABLE` | GTIN/EAN-13 code (can be null for fresh produce) |
-| `custom_attributes` | Domain Extensions | `JSON` | `NULLABLE` | Grade, variety, packaging specs, `hs_code` (imported goods) |
-| `created_at` | Record Created At | `DATETIME` | `DEFAULT CURRENT_TIMESTAMP` | Audit timestamp |
+| `std_item_id` | 표준 상품 ID | `INT` | `PK, AUTO_INCREMENT` | 시스템 고유 식별자 |
+| `category_l` | 대분류 | `VARCHAR(50)` | `NOT NULL` | 신선, 상온, 생활용품 등 |
+| `category_m` | 중분류 | `VARCHAR(50)` | `NOT NULL` | 과일, 육류, 세제, 양념 |
+| `item_name` | 표준 품목명 | `VARCHAR(100)` | `NOT NULL` | 표준 이름(예: 사과, 양파) |
+| `standard_unit` | 표준 계량 단위 | `VARCHAR(20)` | `NOT NULL` | 기준 단위: `100g`, `1kg`, `100ml`, `1unit`(롤, 장, 개는 `1unit`으로 환산) |
+| `barcode` | 글로벌 바코드 | `VARCHAR(50)` | `UNIQUE, NULLABLE` | GTIN/EAN-13 코드(신선식품은 null 가능) |
+| `custom_attributes` | 도메인 확장 | `JSON` | `NULLABLE` | 등급, 품종, 포장 규격, `hs_code`(수입품) |
+| `created_at` | 레코드 생성 시각 | `DATETIME` | `DEFAULT CURRENT_TIMESTAMP` | 감사용 타임스탬프 |
 
-### 3.2 External Public Benchmarks (`ext_public_benchmarks`)
-Time-series table capturing wholesale market auctions and government price indices.
+### 3.2 외부 공개 벤치마크 (`ext_public_benchmarks`)
+도매시장 경매와 정부 물가 지수를 담는 시계열 테이블입니다.
 
-| Column Name | Logical Name | Data Type | Constraints | Description |
+| 열 이름 | 논리 이름 | 데이터 타입 | 제약 | 설명 |
 | :--- | :--- | :--- | :--- | :--- |
-| `benchmark_id` | Benchmark ID | `BIGINT` | `PK, AUTO_INCREMENT` | Composite PK with `recorded_date` |
-| `recorded_date` | Observation Date | `DATE` | `PK, NOT NULL` | Partition key (`YYYY-MM-DD`) |
-| `source_type` | Data Source | `VARCHAR(30)` | `NOT NULL` | `KAMIS`, `GARAK`, `KCA_PRICE`, `CUSTOMS` |
-| `std_item_id` | Standard Product ID | `INT` | `FK*` -> master_products | Normalized item reference |
-| `raw_item_name` | Raw Scraped Name | `VARCHAR(150)` | `NOT NULL` | Raw text captured from source |
-| `avg_price` | Average Price | `DECIMAL(12,2)` | `NOT NULL` | Daily average settled price ($\text{KRW}$) |
-| `min_price` | Minimum Price | `DECIMAL(12,2)` | `NOT NULL` | Lowest auction/survey price ($\text{KRW}$) |
-| `max_price` | Maximum Price | `DECIMAL(12,2)` | `NOT NULL` | Highest auction/survey price ($\text{KRW}$) |
-| `normalized_price` | Normalized Base Price | `DECIMAL(10,2)` | `NOT NULL` | Calculated price per `standard_unit` |
-| `extra_metrics` | Additional Metrics | `JSON` | `NULLABLE` | Inflow volume ($\text{kg}$), count, exchange rate |
+| `benchmark_id` | 벤치마크 ID | `BIGINT` | `PK, AUTO_INCREMENT` | `recorded_date`와 복합 PK |
+| `recorded_date` | 관측일 | `DATE` | `PK, NOT NULL` | 파티션 키(`YYYY-MM-DD`) |
+| `source_type` | 데이터 출처 | `VARCHAR(30)` | `NOT NULL` | `KAMIS`, `GARAK`, `KCA_PRICE`, `CUSTOMS` |
+| `std_item_id` | 표준 상품 ID | `INT` | `FK*` -> master_products | 정규화된 품목 참조 |
+| `raw_item_name` | 원본 수집명 | `VARCHAR(150)` | `NOT NULL` | 출처에서 가져온 원문 |
+| `avg_price` | 평균 가격 | `DECIMAL(12,2)` | `NOT NULL` | 일 평균 정산가($\text{KRW}$) |
+| `min_price` | 최저 가격 | `DECIMAL(12,2)` | `NOT NULL` | 경매/조사 최저가($\text{KRW}$) |
+| `max_price` | 최고 가격 | `DECIMAL(12,2)` | `NOT NULL` | 경매/조사 최고가($\text{KRW}$) |
+| `normalized_price` | 정규화 기준가 | `DECIMAL(10,2)` | `NOT NULL` | `standard_unit`당으로 계산한 가격 |
+| `extra_metrics` | 추가 지표 | `JSON` | `NULLABLE` | 반입량($\text{kg}$), 건수, 환율 |
 
-### 3.3 External Retail Market Prices (`ext_retail_prices`)
-Time-series table capturing competitor listing snapshots.
+### 3.3 외부 소매 시장 가격 (`ext_retail_prices`)
+경쟁사 상품 스냅샷을 담는 시계열 테이블입니다.
 
-| Column Name | Logical Name | Data Type | Constraints | Description |
+| 열 이름 | 논리 이름 | 데이터 타입 | 제약 | 설명 |
 | :--- | :--- | :--- | :--- | :--- |
-| `retail_id` | Retail Snapshot ID | `BIGINT` | `PK, AUTO_INCREMENT` | Composite PK with `scraped_at` |
-| `scraped_at` | Scrape Timestamp | `DATETIME` | `PK, NOT NULL` | Partition key |
-| `platform` | E-Commerce Platform | `VARCHAR(30)` | `NOT NULL` | `COUPANG`, `KURLY`, `SSG`, `OASIS`, `BMART`, `NAVER` |
-| `std_item_id` | Standard Product ID | `INT` | `FK*` -> master_products | Normalized item reference (resolved via `product_channel_map`, §3.6) |
-| `match_confidence` | Match Confidence | `DECIMAL(4,3)` | `NOT NULL` | 0–1 score from product matcher; <0.8 excluded from price recommendations |
-| `channel_item_code` | Channel SKU ID | `VARCHAR(100)` | `NOT NULL` | Platform-specific identifier |
-| `product_title` | Raw Listing Title | `VARCHAR(255)` | `NOT NULL` | Full listing string |
-| `original_price` | List Retail Price | `INT` | `NOT NULL` | Pre-discount strike-through price |
-| `sale_price` | Realized Sale Price | `INT` | `NOT NULL` | Net listing price presented to customer |
-| `normalized_unit_price` | Unit Comparison Price | `DECIMAL(10,2)` | `NOT NULL` | Derived price per canonical `standard_unit` |
-| `is_out_of_stock` | Stock-out Flag | `TINYINT(1)` | `DEFAULT 0` | `0`: In Stock, `1`: Out of Stock |
-| `badge_info` | Promo / Logistics Badge| `VARCHAR(100)` | `NULLABLE` | `RocketFresh`, `TimeSale`, `Closeout` |
-| `extraction_source` | Extraction Source | `VARCHAR(10)` | `DEFAULT 'SELECTOR'` | `SELECTOR`, `API`, `LLM` (see F-02-4) |
-| `region_code` | Postal Code Zone | `VARCHAR(10)` | `NOT NULL` | Target delivery zip/zone for cold chain |
+| `retail_id` | 소매 스냅샷 ID | `BIGINT` | `PK, AUTO_INCREMENT` | `scraped_at`과 복합 PK |
+| `scraped_at` | 수집 시각 | `DATETIME` | `PK, NOT NULL` | 파티션 키 |
+| `platform` | 이커머스 플랫폼 | `VARCHAR(30)` | `NOT NULL` | `COUPANG`, `KURLY`, `SSG`, `OASIS`, `BMART`, `NAVER` |
+| `std_item_id` | 표준 상품 ID | `INT` | `FK*` -> master_products | 정규화된 품목 참조(`product_channel_map`으로 결정, §3.6) |
+| `match_confidence` | 매칭 신뢰도 | `DECIMAL(4,3)` | `NOT NULL` | 상품 매처의 0~1 점수. 0.8 미만은 가격 추천에서 제외 |
+| `channel_item_code` | 채널 SKU ID | `VARCHAR(100)` | `NOT NULL` | 플랫폼별 식별자 |
+| `product_title` | 원본 상품 제목 | `VARCHAR(255)` | `NOT NULL` | 상품 문자열 전체 |
+| `original_price` | 정가 | `INT` | `NOT NULL` | 할인 전 취소선 가격 |
+| `sale_price` | 판매가 | `INT` | `NOT NULL` | 고객에게 보이는 실제 상품 가격 |
+| `normalized_unit_price` | 단위 비교 가격 | `DECIMAL(10,2)` | `NOT NULL` | 표준 `standard_unit`당 환산 가격 |
+| `is_out_of_stock` | 품절 플래그 | `TINYINT(1)` | `DEFAULT 0` | `0`: 재고 있음, `1`: 품절 |
+| `badge_info` | 프로모션/물류 배지 | `VARCHAR(100)` | `NULLABLE` | `RocketFresh`, `TimeSale`, `Closeout` |
+| `extraction_source` | 추출 출처 | `VARCHAR(10)` | `DEFAULT 'SELECTOR'` | `SELECTOR`, `API`, `LLM`(F-02-4 참고) |
+| `region_code` | 우편번호 권역 | `VARCHAR(10)` | `NOT NULL` | 콜드체인 대상 배송 우편번호/권역 |
 
-### 3.4 Internal Operations & Inventory (`int_operations_inventory`)
-Internal cost accounting, warehouse balance, and velocity snapshot.
+### 3.4 내부 운영 및 재고 (`int_operations_inventory`)
+내부 원가 회계, 창고 잔고, 판매 속도 스냅샷입니다.
 
-| Column Name | Logical Name | Data Type | Constraints | Description |
+| 열 이름 | 논리 이름 | 데이터 타입 | 제약 | 설명 |
 | :--- | :--- | :--- | :--- | :--- |
-| `internal_id` | Internal Record ID | `BIGINT` | `PK, AUTO_INCREMENT` | Composite PK with `recorded_date` |
-| `recorded_date` | Ledger Date | `DATE` | `PK, NOT NULL` | Partition key |
-| `std_item_id` | Standard Product ID | `INT` | `FK*` -> master_products | Normalized item reference |
-| `internal_sku` | Internal ERP SKU | `VARCHAR(50)` | `NOT NULL` | ERP / WMS catalog code |
-| `channel_name` | Operational Channel | `VARCHAR(50)` | `NOT NULL` | Target channel listing |
-| `purchase_cost` | Landed COGS | `DECIMAL(10,2)` | `NOT NULL` | Direct unit acquisition cost |
-| `fixed_cost` | Processing & Packaging | `DECIMAL(10,2)` | `NOT NULL` | Labor, packaging, cushioning fees |
-| `logistics_cost` | Fulfillment & Storage | `DECIMAL(10,2)` | `NOT NULL` | Inbound, handling, storage, delivery |
-| `channel_fee_rate` | Channel Commission % | `DECIMAL(5,2)` | `NOT NULL` | Stored as **percent** (e.g., `11.50` = 11.5%). Formulas MUST divide by 100. |
-| `promo_cost` | Promotion / Coupon Cost | `DECIMAL(10,2)` | `DEFAULT 0` | Per-unit coupon/promo subsidy borne by seller |
-| `vat_inclusive` | VAT Basis Flag | `TINYINT(1)` | `DEFAULT 1` | `1`: selling price includes VAT (margin computed on VAT-exclusive price) |
-| `current_selling_price`| Live System Price | `INT` | `NOT NULL` | Current active listing price |
-| `stock_qty` | Available Stock | `INT` | `NOT NULL` | Available on hand + allocated cross-dock |
-| `daily_sales_qty` | Daily Units Sold | `INT` | `NOT NULL` | Units dispatched on `recorded_date`; the 3-day average (F-03-3) is derived from the last 3 daily rows |
-| `pack_std_units` | Standard Units per Sale Unit | `DECIMAL(10,4)` | `DEFAULT 1` | Converts competitor per-`standard_unit` prices to this listing's pack (e.g. 1.2 kg = 12 × `100g`) |
-| `min_price_floor` | Floor Guard Price | `INT` | `NOT NULL` | Computed by the system as the lowest integer price whose net margin ≥ `target_min_margin_pct` (closed form `ceil(costs / (k − fee/100))`, `k = (1 − target)/(1 + VAT)` if VAT-inclusive else `(1 − target)`, verified exactly in integer search). Manual override allowed (ADMIN, audited). Recomputed on cost-input changes. |
-| `lifecycle_metric` | Expiry / Age Matrix | `JSON` | `NOT NULL` | `remaining_days` ($D\text{-Day}$), `holding_age_days` |
+| `internal_id` | 내부 레코드 ID | `BIGINT` | `PK, AUTO_INCREMENT` | `recorded_date`와 복합 PK |
+| `recorded_date` | 장부 날짜 | `DATE` | `PK, NOT NULL` | 파티션 키 |
+| `std_item_id` | 표준 상품 ID | `INT` | `FK*` -> master_products | 정규화된 품목 참조 |
+| `internal_sku` | 내부 ERP SKU | `VARCHAR(50)` | `NOT NULL` | ERP / WMS 카탈로그 코드 |
+| `channel_name` | 운영 채널 | `VARCHAR(50)` | `NOT NULL` | 대상 채널 상품 |
+| `purchase_cost` | 도착 원가(COGS) | `DECIMAL(10,2)` | `NOT NULL` | 단위당 직접 취득 원가 |
+| `fixed_cost` | 가공 및 포장 | `DECIMAL(10,2)` | `NOT NULL` | 인건비, 포장, 완충재 비용 |
+| `logistics_cost` | 풀필먼트 및 보관 | `DECIMAL(10,2)` | `NOT NULL` | 입고, 취급, 보관, 배송 |
+| `channel_fee_rate` | 채널 수수료율 % | `DECIMAL(5,2)` | `NOT NULL` | **퍼센트**로 저장(예: `11.50` = 11.5%). 수식에서 반드시 100으로 나눕니다. |
+| `promo_cost` | 프로모션/쿠폰 비용 | `DECIMAL(10,2)` | `DEFAULT 0` | 판매자가 부담하는 단위당 쿠폰/프로모션 보조금 |
+| `vat_inclusive` | VAT 기준 플래그 | `TINYINT(1)` | `DEFAULT 1` | `1`: 판매가가 VAT를 포함(마진은 VAT 제외 가격 기준으로 계산) |
+| `current_selling_price`| 현재 시스템 가격 | `INT` | `NOT NULL` | 현재 적용 중인 판매가 |
+| `stock_qty` | 가용 재고 | `INT` | `NOT NULL` | 보유 + 배정된 크로스도크 재고 |
+| `daily_sales_qty` | 일 판매 수량 | `INT` | `NOT NULL` | `recorded_date`에 출고한 수량. 3일 평균(F-03-3)은 최근 3일 행에서 구합니다 |
+| `pack_std_units` | 판매 단위당 표준 단위 수 | `DECIMAL(10,4)` | `DEFAULT 1` | 경쟁사의 `standard_unit`당 가격을 이 상품의 팩으로 환산(예: 1.2kg = 12 × `100g`) |
+| `min_price_floor` | 바닥가 보호 가격 | `INT` | `NOT NULL` | 순마진이 `target_min_margin_pct` 이상이 되는 가장 낮은 정수 가격으로 시스템이 계산(닫힌 식 `ceil(costs / (k − fee/100))`, VAT 포함이면 `k = (1 − target)/(1 + VAT)`, 아니면 `k = (1 − target)`, 정수 탐색으로 정확히 검증). 수동 재정의 가능(ADMIN, 감사 기록). 원가 입력이 바뀌면 다시 계산합니다. |
+| `lifecycle_metric` | 소비기한/숙성 매트릭스 | `JSON` | `NOT NULL` | `remaining_days`($D\text{-Day}$), `holding_age_days` |
 
-### 3.5 Personalization & Watchlists (`users`, `user_category_assignments`, `user_watchlists`, `user_preferences`)
-* `users`: `user_id` (PK), `email`, `name`, `role` (`ADMIN`, `MD`, `BUYER`), `password_hash` (scrypt), `active`.
-* `user_category_assignments`: `user_id` (FK), `category_l`, `category_m` (NULL = all) — defines the scope used by F-05-1.
-* `user_watchlists`: `watch_id` (PK), `user_id` (FK), `std_item_id` (FK), `sort_order`.
-* `user_preferences`: `pref_id` (PK), `user_id` (FK), `alert_margin_bep` (`DECIMAL(5,2)`), `ui_layout` (`JSON`).
+### 3.5 개인화와 관심 목록 (`users`, `user_category_assignments`, `user_watchlists`, `user_preferences`)
+* `users`: `user_id`(PK), `email`, `name`, `role`(`ADMIN`, `MD`, `BUYER`), `password_hash`(scrypt), `active`.
+* `user_category_assignments`: `user_id`(FK), `category_l`, `category_m`(NULL = 전체). F-05-1에서 쓰는 범위를 정의합니다.
+* `user_watchlists`: `watch_id`(PK), `user_id`(FK), `std_item_id`(FK), `sort_order`.
+* `user_preferences`: `pref_id`(PK), `user_id`(FK), `alert_margin_bep`(`DECIMAL(5,2)`), `ui_layout`(`JSON`).
 
-### 3.6 Channel Product Mapping & Audit (`product_channel_map`, `price_recommendations`, `audit_log`)
-* `product_channel_map`: `platform`, `channel_item_code` (composite PK), `std_item_id` (FK), `pack_size_factor` (`DECIMAL(10,4)`), `match_method` (`BARCODE`, `RULE`, `LLM`, `MANUAL`), `match_confidence`, `reviewed_by`, `reviewed_at`. Matching order: barcode exact → rule/token match (variety, grade, origin, pack size) → LLM-assisted suggestion. Matches below 0.8 confidence enter a manual review queue and are excluded from pricing.
-* `price_recommendations`: `rec_id` (PK), `created_at`, `std_item_id`, `channel_name`, `current_price`, `suggested_price`, `reason_code`, `flags` (`JSON`), `status` (`PENDING`, `APPROVED`, `REJECTED`, `APPLIED`, `SUPPRESSED`, `REVERTED`), `decided_by` (actor name), `decided_at` (also the cool-down clock: set again on apply/revert).
-* `audit_log`: append-only record of price changes, floor overrides, role changes, selector approvals, and match reviews (`actor`, `action`, `before`, `after`, `ts`).
+### 3.6 채널 상품 매핑과 감사 (`product_channel_map`, `price_recommendations`, `audit_log`)
+* `product_channel_map`: `platform`, `channel_item_code`(복합 PK), `std_item_id`(FK), `pack_size_factor`(`DECIMAL(10,4)`), `match_method`(`BARCODE`, `RULE`, `LLM`, `MANUAL`), `match_confidence`, `reviewed_by`, `reviewed_at`. 매칭 순서: 바코드 정확 일치 → 규칙/토큰 매칭(품종, 등급, 원산지, 팩 크기) → LLM 보조 제안. 신뢰도 0.8 미만 매칭은 수동 검토 큐에 들어가며 가격 책정에서 제외됩니다.
+* `price_recommendations`: `rec_id`(PK), `created_at`, `std_item_id`, `channel_name`, `current_price`, `suggested_price`, `reason_code`, `flags`(`JSON`), `status`(`PENDING`, `APPROVED`, `REJECTED`, `APPLIED`, `SUPPRESSED`, `REVERTED`), `decided_by`(행위자 이름), `decided_at`(쿨다운 시계이기도 하며 적용/되돌리기 때 다시 설정).
+* `audit_log`: 가격 변경, 바닥가 재정의, 역할 변경, 셀렉터 승인, 매칭 검토를 추가만 가능하게 기록합니다(`actor`, `action`, `before`, `after`, `ts`).
 
 ---
 
-## 4. Functional Requirements
+## 4. 기능 요구사항
 
-### F-01: Multi-Source Data Collection Engine
-* **F-01-1 (Public Benchmark Sync):** Scheduled cron workers execute daily at `06:00` and `09:00 KST` to parse KAMIS and Garak Market auction APIs. Weekly scheduled cron executes for KCA Price.
-* **F-01-2 (External Retail Scraper):** Executes thrice daily at `08:00` (Morning cutoff), `13:00` (Midday sync), and `19:00` (Clearance markdowns).
-  * Implements **Human-Like Navigation**: Simulates user keystroke intervals ($50\text{--}150\text{ms}$ jitter via `page.type()`), randomized smooth page scrolling ($200\text{--}500\text{px}$ increments with random pauses), and dynamic viewport/session variation.
-  * Incorporates context persistence and localized headers (`ko-KR`, `Asia/Seoul`).
-  * **Compliance gate (required before production use):** Each platform connector declares its access method (`OFFICIAL_API`, `PARTNER_FEED`, `SCRAPE`). Official APIs/feeds MUST be preferred. A `SCRAPE` connector may be enabled only after a documented legal review of the platform's ToS and applicable Korean law, recorded in the connector's config (`legal_review_ref`). Connectors enforce `robots.txt`/rate limits per config. Anti-bot mitigation features (stealth, IP rotation) are disabled by default and require explicit per-connector enablement after that review.
-* **F-01-3 (Internal Data Synchronization):** Provides REST endpoints and an asynchronous CSV/XLSX drag-and-drop batch parser for WMS/ERP inventory dumps.
+### F-01: 다중 소스 데이터 수집 엔진
+* **F-01-1 (공개 벤치마크 동기화):** 예약된 크론 워커가 매일 `06:00`과 `09:00 KST`에 KAMIS와 가락시장 경매 API를 파싱합니다. KCA Price는 주 1회 크론으로 실행합니다.
+* **F-01-2 (외부 소매 스크래퍼):** 하루 세 번, `08:00`(오전 마감), `13:00`(낮 동기화), `19:00`(소진 인하)에 실행합니다.
+  * **사람 같은 탐색**을 구현합니다: 사용자 키 입력 간격 시뮬레이션(`page.type()`으로 $50\text{--}150\text{ms}$ 지터), 무작위 부드러운 페이지 스크롤($200\text{--}500\text{px}$ 단위, 무작위 멈춤), 동적 뷰포트/세션 변화.
+  * 컨텍스트 지속성과 현지화 헤더(`ko-KR`, `Asia/Seoul`)를 포함합니다.
+  * **컴플라이언스 관문(운영 사용 전 필수):** 각 플랫폼 커넥터는 접근 방식(`OFFICIAL_API`, `PARTNER_FEED`, `SCRAPE`)을 선언합니다. 공식 API/피드를 우선해야 합니다. `SCRAPE` 커넥터는 플랫폼 약관과 관련 한국 법에 대한 문서화된 법무 검토를 커넥터 설정(`legal_review_ref`)에 기록한 뒤에만 켤 수 있습니다. 커넥터는 설정에 따라 `robots.txt`와 속도 제한을 지킵니다. 봇 탐지 완화 기능(스텔스, IP 교체)은 기본적으로 꺼져 있고 그 검토 뒤 커넥터별로 명시적으로 켜야 합니다.
+* **F-01-3 (내부 데이터 동기화):** REST 엔드포인트와 WMS/ERP 재고 덤프용 비동기 CSV/XLSX 드래그앤드롭 배치 파서를 제공합니다.
 
-### F-02: AI Self-Healing Scraper
-* **F-02-1 (Failure Detection):** If standard CSS/XPath selectors fail for 3 consecutive attempts or return critical fields (`sale_price`, `product_title`) as `NULL`, the scraper intercepts execution and raises a `ScrapeExtractionFault`.
-* **F-02-2 (LLM Fallback Extraction):**
-  * Strips scripts, style tags, SVG assets, and base64 payloads to construct sanitized, token-efficient HTML/Markdown.
-  * Dispatches payload to Gemini Flash with structured schema constraints:
+### F-02: AI 자가 복구 스크래퍼
+* **F-02-1 (실패 탐지):** 표준 CSS/XPath 셀렉터가 3번 연속 실패하거나 핵심 필드(`sale_price`, `product_title`)가 `NULL`이면 스크래퍼가 실행을 가로채 `ScrapeExtractionFault`를 발생시킵니다.
+* **F-02-2 (LLM 대체 추출):**
+  * 스크립트, 스타일 태그, SVG, base64 페이로드를 제거해 토큰 효율적인 정제 HTML/마크다운을 만듭니다.
+  * 구조화된 스키마 제약과 함께 Gemini Flash로 페이로드를 보냅니다.
     $$\text{Payload} \xrightarrow{\text{Gemini Flash}} \{\text{product\_title}, \text{sale\_price}, \text{original\_price}, \text{is\_out\_of\_stock}, \text{badge\_info}\}$$
-* **F-02-3 (Selector Re-Synthesis):** Uses LLM token match locations to derive new robust selector candidates and emits an alert to Slack. Candidates are persisted in `selector_candidates`; they are **promoted to the persistent selector set only after human approval** (audited).
-* **F-02-4 (Extraction Validation):** Every LLM-extracted record MUST pass sanity checks before persistence: `sale_price > 0`, `sale_price <= original_price`, and deviation from the last accepted price for the same `channel_item_code` within a configurable bound (default ±50%). Failing records are quarantined (not written to `ext_retail_prices`) and alerted. Persisted LLM-sourced rows carry `extraction_source = 'LLM'` (§3.3) so they can be filtered.
+* **F-02-3 (셀렉터 재합성):** LLM 토큰 일치 위치로 견고한 새 셀렉터 후보를 도출하고 Slack에 알립니다. 후보는 `selector_candidates`에 저장되며, **사람이 승인한 뒤에만** 영구 셀렉터 집합으로 승격됩니다(감사 기록).
+* **F-02-4 (추출 검증):** LLM이 추출한 모든 레코드는 저장 전에 건전성 검사를 통과해야 합니다: `sale_price > 0`, `sale_price <= original_price`, 같은 `channel_item_code`의 마지막 승인 가격과의 편차가 설정 범위(기본 ±50%) 이내. 실패한 레코드는 격리하고(`ext_retail_prices`에 쓰지 않음) 알립니다. LLM에서 온 저장 행은 걸러 낼 수 있도록 `extraction_source = 'LLM'`을 갖습니다(§3.3).
 
-### F-03: Data Normalization & Metric Computations
-* **F-03-1 (Unit Standardization):** Uses regular expressions and token dictionaries to parse ambiguous descriptions:
+### F-03: 데이터 정규화 및 지표 계산
+* **F-03-1 (단위 표준화):** 정규식과 토큰 사전으로 모호한 설명을 파싱합니다.
   $$\text{"[Organic] Seongju Melon 1.2kg (4-6 units)"} \implies \text{Total Weight} = 1200\text{g} \implies \text{Rate} = \frac{\text{Sale Price}}{12} \text{ per } 100\text{g}$$
-* **F-03-2 (Realized Net Margin Engine):**
-  Let $P_{net} = \text{Selling Price}/1.10$ if `vat_inclusive = 1` (Korean VAT 10%), else $\text{Selling Price}$. Commission rate $r = \text{channel\_fee\_rate}/100$.
+* **F-03-2 (실현 순마진 엔진):**
+  `vat_inclusive = 1`이면 $P_{net} = \text{판매가}/1.10$(한국 VAT 10%), 아니면 $P_{net} = \text{판매가}$로 둡니다. 수수료율은 $r = \text{channel\_fee\_rate}/100$입니다.
   $$\text{Net Margin Amount} = P_{net} - \left(\text{COGS} + \text{Packaging} + \text{Logistics} + \text{Promo} + (\text{Selling Price} \times r)\right)$$
   $$\text{Net Margin Rate (\%)} = \left(\frac{\text{Net Margin Amount}}{P_{net}}\right) \times 100$$
-  Computation uses `Decimal`; results are rounded half-up to 2 decimals. (Commission base — VAT-inclusive vs exclusive — is configurable per channel; default VAT-inclusive.)
-* **F-03-3 (Inventory Run-Rate & Exhaustion Velocity):**
+  계산은 `Decimal`을 쓰고 결과는 소수 둘째 자리에서 반올림(half-up)합니다. (수수료 기준이 VAT 포함인지 제외인지는 채널별로 설정할 수 있으며 기본은 VAT 포함입니다.)
+* **F-03-3 (재고 런레이트와 소진 속도):**
   $$\text{Run-Rate (Days to Exhaust)} = \frac{\text{Current Available Stock}}{\text{Average Daily Sales (Last 3 Days)}}$$
-  If the 3-day average is $0$, Run-Rate is `INFINITE` (no exhaustion projected); if fewer than 3 days of history exist, the average uses available days. Downstream rules MUST handle `INFINITE` explicitly.
+  3일 평균이 $0$이면 런레이트는 `INFINITE`(소진 예상 없음)이며, 이력이 3일 미만이면 있는 날로 평균을 냅니다. 이후 규칙은 `INFINITE`를 명시적으로 처리해야 합니다.
 
-### F-04: Action & Decision Optimization Engine
-* **F-04-1 (Dynamic Price Floor Guarding):**
-  * **Recommendation algorithm (default strategy `COMPETITIVE_MATCH`, configurable per category):**
-    1. Gather competitor normalized unit prices for the item from in-stock listings with `match_confidence >= 0.8`, in the same `region_code`, scraped within the last 24h. If none, produce no recommendation.
-    2. Reference price $R$ = the lowest competitor price, converted to this item's pack size via `pack_size_factor`.
-    3. Target $T = R \times (1 - u)$, where $u$ is the undercut ratio (default `0%`, i.e. match; range 0–5%).
-    4. Cap movement: $|T - \text{current}| / \text{current} \le$ `max_step` (default 10% per run) to avoid oscillation; apply a cool-down (default 6h) after any applied change. The cool-down holds only the price: spoilage and reverse-margin warnings are still raised (low-margin and wholesale-guard stay quiet, as they follow from the change just applied) (recommendation `SUPPRESSED`, reason `COOLDOWN_HOLD`, held price in `flags.COOLDOWN_HOLD`).
-    5. Wholesale guard: if the public benchmark index rose more than a configurable threshold since the last run, do not recommend a decrease for that item.
-    6. Clamp to floor: Suggested Price $= \max(T, \text{min\_price\_floor})$.
-    Alternative strategies (`MARGIN_TARGET`, `BENCHMARK_MARKUP`) implement the same `PricingStrategy` interface and are selected via configuration.
-  * If the unclamped target $T < \text{min\_price\_floor}$, suppress automatic downward adjustment, keep the current price (or floor, if the current price is already below it), and trigger a `REVERSE_MARGIN_WARNING` (Level: RED).
-* **F-04-0 (Execution Mode & Approval):** Default mode is **advisory**: recommendations are written to `price_recommendations` with status `PENDING` and require MD/ADMIN approval. Auto-apply is opt-in per item/category, requires an ADMIN-defined guard set (floor, `max_step`, cool-down), and writes back to channels only through the channel connector's official API. Every decision and applied change is recorded in `audit_log` and can be reverted to the prior price in one action.
-* **F-04-2 (Expiration & Aging Defensive Actions):**
-  * If $\text{Remaining Shelf Life }(D\text{-Day}) \le \text{Run-Rate (Days)} + \text{safety\_buffer}$ (buffer default `0` days; configurable per category, e.g. last-mile handling), immediately assert `SPOILAGE_RISK_FLAG`. An `INFINITE` Run-Rate with stock > 0 always asserts the flag.
-  * Suggest automated actions: Trigger flash discount coupons or reroute stock to secondary/offline markdown channels.
-* **F-04-3 (Supply Vacuum Exploitation):**
-  * If competitor listings transition to $\text{is\_out\_of\_stock} = 1$ while internal inventory is healthy ($\text{Run-Rate} > 7\text{ days}$) **and `SPOILAGE_RISK_FLAG` is not asserted** (spoilage takes precedence), recommend an opportunistic upward price adjustment of $+5\%$ to $+15\%$.
+### F-04: 행동 및 의사결정 최적화 엔진
+* **F-04-1 (동적 바닥가 보호):**
+  * **추천 알고리즘(기본 전략 `COMPETITIVE_MATCH`, 카테고리별 설정 가능):**
+    1. 같은 `region_code`에서 지난 24시간 안에 수집한, `match_confidence >= 0.8`인 재고 있는 상품의 경쟁사 정규화 단위 가격을 모읍니다. 없으면 추천하지 않습니다.
+    2. 기준가 $R$ = 가장 낮은 경쟁사 가격을 `pack_size_factor`로 이 상품의 팩 크기에 환산한 값.
+    3. 목표가 $T = R \times (1 - u)$, $u$는 언더컷 비율(기본 `0%`, 즉 맞추기, 범위 0~5%).
+    4. 이동 폭 제한: 진동을 막기 위해 $|T - \text{current}| / \text{current} \le$ `max_step`(기본 실행당 10%). 적용된 변경 뒤에는 쿨다운(기본 6시간)을 둡니다. 쿨다운은 가격만 묶으며, 폐기 위험과 역마진 경고는 계속 나옵니다(낮은 마진과 도매 보호는 방금 적용한 변경의 결과이므로 조용히 둡니다)(추천은 `SUPPRESSED`, 사유 `COOLDOWN_HOLD`, 유지한 가격은 `flags.COOLDOWN_HOLD`).
+    5. 도매 보호: 마지막 실행 이후 공개 벤치마크 지수가 설정 임계값보다 더 올랐다면 그 품목의 인하는 추천하지 않습니다.
+    6. 바닥가로 제한: 제안 가격 $= \max(T, \text{min\_price\_floor})$.
+    다른 전략(`MARGIN_TARGET`, `BENCHMARK_MARKUP`)은 같은 `PricingStrategy` 인터페이스를 구현하며 설정으로 선택합니다.
+  * 제한 전 목표가 $T < \text{min\_price\_floor}$이면 자동 인하를 막고 현재 가격을 유지하며(현재 가격이 이미 바닥가 아래면 바닥가로), `REVERSE_MARGIN_WARNING`(등급: RED)을 발생시킵니다.
+* **F-04-0 (실행 모드와 승인):** 기본 모드는 **보조(advisory)** 입니다. 추천은 `PENDING` 상태로 `price_recommendations`에 기록되고 MD/ADMIN의 승인이 필요합니다. 자동 적용은 품목/카테고리별 선택 사항이며, ADMIN이 정의한 가드 집합(바닥가, `max_step`, 쿨다운)이 필요하고, 채널 커넥터의 공식 API로만 채널에 씁니다. 모든 결정과 적용된 변경은 `audit_log`에 기록되고 한 번의 동작으로 이전 가격으로 되돌릴 수 있습니다.
+* **F-04-2 (소비기한 및 숙성 방어 행동):**
+  * $\text{남은 소비기한}(D\text{-Day}) \le \text{런레이트(일)} + \text{safety\_buffer}$이면(버퍼 기본 `0`일, 마지막 구간 처리 등을 위해 카테고리별 설정 가능) 즉시 `SPOILAGE_RISK_FLAG`를 세웁니다. 재고가 있는데 런레이트가 `INFINITE`이면 항상 이 플래그를 세웁니다.
+  * 자동 행동을 제안합니다: 반짝 할인 쿠폰을 발행하거나 재고를 보조/오프라인 소진 채널로 돌립니다.
+* **F-04-3 (공급 공백 활용):**
+  * 내부 재고가 충분한데($\text{런레이트} > 7\text{일}$) 경쟁사 상품이 $\text{is\_out\_of\_stock} = 1$로 바뀌고 **`SPOILAGE_RISK_FLAG`가 세워져 있지 않으면**(폐기 위험이 우선) $+5\%$~$+15\%$의 기회성 인상을 추천합니다.
 
-### F-05: User Interface & Personalization
-* **F-05-1 (Role-Based Watchlist):** Category managers access filtered matrices displaying only assigned items (`category_l`, `category_m`).
-* **F-05-2 (Three-Way Comparison Matrix):** Side-by-side visual mapping across:
-  $$\text{[Public Wholesale Index]} \longleftrightarrow \text{[Internal Landed Cost \& Active Price]} \longleftrightarrow \text{[Competitor Scraped Prices]}$$
-* **F-05-3 (Configurable Notification Rules):** Webhook/Slack alert dispatches when margin drops below threshold ($\le 10\%$ default; per category the highest `alert_margin_bep` among active ADMINs and the MDs assigned to it, BUYERs ignored) or stock-out events occur. Alerts are de-duplicated per (rule, item, channel) with a configurable suppression window (default 6h, persisted in `alert_log`), rate-limited, and retried with exponential backoff (max 5 attempts) before landing in a dead-letter log.
+### F-05: 사용자 인터페이스와 개인화
+* **F-05-1 (역할 기반 관심 목록):** 카테고리 담당자는 배정된 품목(`category_l`, `category_m`)만 보이는 필터링된 매트릭스를 봅니다.
+* **F-05-2 (3자 비교 매트릭스):** 다음을 나란히 시각적으로 매핑합니다.
+  $$\text{[공개 도매 지수]} \longleftrightarrow \text{[내부 도착 원가 및 현재 가격]} \longleftrightarrow \text{[경쟁사 수집 가격]}$$
+* **F-05-3 (설정 가능한 알림 규칙):** 마진이 임계값 아래로 떨어지거나(기본 $\le 10\%$, 카테고리별로 활성 ADMIN과 그 카테고리에 배정된 MD 중 가장 높은 `alert_margin_bep`, BUYER는 제외) 품절 이벤트가 생기면 웹훅/Slack으로 알립니다. 알림은 (규칙, 품목, 채널)별로 설정 가능한 억제 구간(기본 6시간, `alert_log`에 저장)으로 중복을 제거하고, 속도를 제한하고, 지수 백오프로 재시도(최대 5번)한 뒤 폐기 로그에 둡니다.
 
-### F-06: Market Intelligence (Category Health + Trend Radar)
-Implemented per `docs/MI_FRAMEWORK.md` (requirements source, Korean). Demand and interest signals (SEARCH, BUYER, SKU, PRODUCT, PROMOTION, MEDIA) are imported from CSV/XLSX (`import-mi`, or admin-only `POST /mi/import`) into `mi_observations` (long format, upsert on signal/period/category/keyword/metric).
-* **F-06-1 (Category Health):** per category, demand direction (GMV, else units sold; recent mean vs prior mean), demand-share shift in percentage points, stock cover from `int_operations_inventory` (TIGHT < 3 days, SURPLUS > 14), and a Search→demand lead test: period-over-period changes correlated at lags 0..2, accepted only above both `lead_min_r` and a one-sided p<0.01 critical value, otherwise search is reported as interest, not demand.
-* **F-06-2 (Trend Radar):** per keyword, a lifecycle stage (SEED / EMERGING / GROWING / MAINSTREAM / FADING) from search growth, volume percentile among at least three peers in its category, and corroboration by PRODUCT / PROMOTION / MEDIA mentions; a weighted score (weights configurable in `[mi.weights]`) and an opportunity score (score × (1 − volume percentile)).
-* **F-06-3 (Presentation and access):** every row carries "what changed / why it matters / what to do". Users see only their assigned `category_l` values; rows without a category are admin-only; no cost data is involved.
+### F-06: 마켓 인텔리전스 (카테고리 헬스 + 트렌드 레이더)
+`docs/MI_FRAMEWORK.md`(요구사항 원문, 한국어)에 따라 구현했습니다. 수요와 관심 신호(SEARCH, BUYER, SKU, PRODUCT, PROMOTION, MEDIA)를 CSV/XLSX(`import-mi`, 또는 관리자 전용 `POST /mi/import`)로 가져와 `mi_observations`(롱 포맷, 신호/기간/카테고리/키워드/지표 기준 upsert)에 넣습니다.
+* **F-06-1 (카테고리 헬스):** 카테고리별로 수요 방향(GMV, 없으면 판매수량, 최근 평균 대 이전 평균), 수요 점유율 이동(퍼센트포인트), `int_operations_inventory`의 재고 커버(TIGHT < 3일, SURPLUS > 14일), 검색→수요 선행 검정(기간 대비 변화율을 시차 0~2에서 상관 분석하고 `lead_min_r`과 단측 p<0.01 임계값을 모두 넘을 때만 인정, 아니면 검색은 수요가 아니라 관심으로 보고)을 계산합니다.
+* **F-06-2 (트렌드 레이더):** 키워드별로 검색 증가율, 카테고리 안 동료 3개 이상 사이의 검색량 백분위, PRODUCT / PROMOTION / MEDIA 언급의 뒷받침으로 생애주기 단계(SEED / EMERGING / GROWING / MAINSTREAM / FADING)를 정하고, 가중 점수(가중치는 `[mi.weights]`로 설정)와 기회 점수(점수 × (1 − 검색량 백분위))를 계산합니다.
+* **F-06-3 (표시와 접근):** 모든 행에 "무엇이 바뀌었나 / 왜 중요한가 / 무엇을 할까"가 붙습니다. 사용자는 배정된 `category_l`만 보고, 카테고리가 없는 행은 관리자만 보며, 원가 데이터는 쓰지 않습니다.
 
-### F-07: Crawler Management
-One crawler per data item (`report`, `buyer`, `news`, `competitor`, `flyer`, `newproduct`, `benchmark_kamis`, `benchmark_garak`), each with its own management page.
-* **F-07-1 (Per-crawler schedule and settings):** enabled flag, KST run times (up to 12) and crawler-specific settings (news: feed URLs, extra keywords, look-back days) are stored in `crawler_settings` and take effect without a restart. Feed URLs must be http(s) and are never loopback/private/link-local addresses. Only ADMIN may change them; MD may view.
-* **F-07-2 (Run history and health):** every run is recorded in `crawler_runs` (trigger, status QUEUED/RUNNING/OK/FAILED/SKIPPED, rows, message). A crawler never runs twice at once (compare-and-set claim); a RUNNING row older than 2h is marked failed. A slot missed by more than 6h is skipped. Failures raise a de-duplicated `CRAWLER_FAILED` alert.
-* **F-07-3 (File inbox):** crawlers whose source has no API import CSV/XLSX files from `inbox/<id>/` (or an admin upload, 5 MB), filing each into `processed/` or `failed/`; client file names are never used on disk.
-* **F-07-4 (News):** counts articles per ISO week that mention each tracked keyword (latest search keywords plus extras); counts only ever grow so a rolling feed window cannot erase history.
+### F-07: 크롤러 관리
+데이터 항목마다 크롤러 하나(`report`, `buyer`, `news`, `competitor`, `flyer`, `newproduct`, `benchmark_kamis`, `benchmark_garak`)가 있고, 각각 자기 관리 페이지가 있습니다.
+* **F-07-1 (크롤러별 일정과 설정):** 켜짐 여부, KST 실행 시각(최대 12개), 크롤러별 설정(뉴스: 피드 URL, 추가 키워드, 조회 일수)은 `crawler_settings`에 저장되며 재시작 없이 적용됩니다. 피드 URL은 http(s)여야 하며 루프백/사설/링크로컬 주소는 안 됩니다. ADMIN만 바꿀 수 있고 MD는 볼 수 있습니다.
+* **F-07-2 (실행 이력과 상태):** 모든 실행은 `crawler_runs`에 기록됩니다(트리거, 상태 QUEUED/RUNNING/OK/FAILED/SKIPPED, 행 수, 메시지). 크롤러는 동시에 두 번 실행되지 않으며(compare-and-set 선점), 2시간보다 오래된 RUNNING 행은 실패로 표시합니다. 6시간보다 오래 놓친 슬롯은 건너뜁니다. 실패하면 중복 제거된 `CRAWLER_FAILED` 알림이 나갑니다.
+* **F-07-3 (파일 인박스):** API가 없는 출처의 크롤러는 `inbox/<id>/`의 CSV/XLSX 파일(또는 관리자 업로드, 5MB)을 가져와 `processed/` 또는 `failed/`로 보관하며, 클라이언트 파일명은 디스크에 쓰지 않습니다.
+* **F-07-4 (뉴스):** 추적 키워드(최신 검색 키워드와 추가 키워드)를 언급한 기사를 ISO 주별로 세며, 카운트는 늘기만 하므로 피드 구간이 굴러가도 이력이 지워지지 않습니다.
 
-### F-08: Competitor Price & Margin Analysis (target requirements from the revised functional specification)
-All figures below are the spec's proposed values and must be confirmed before work starts (spec §9). Implementation status per requirement: §4.1 below.
+### F-08: 경쟁사 가격·마진 분석 (개정 기능 명세서의 목표 요구사항)
+아래 수치는 모두 명세서가 제안한 값이며 작업 시작 전에 확정해야 합니다(명세서 §9). 요구사항별 구현 현황은 아래 §4.1에 있습니다.
 
-**Definitions**
-* **Effective purchase price (실구매가):** shown price − instant discount − public coupon + shipping fee; gift promotions convert to unit price (1+1 = 50% per unit); card/membership-only prices are shown in a separate column. Comparison is on the standard unit price of the effective price.
-* **Net margin rate:** (P − purchase cost − logistics − platform fee − disposal cost) ÷ P. Disposal cost is the category average disposal rate allocated per SKU unless SKU data exists.
-* **BEP quantity:** Q_BEP = Q_current × (P_current − C) ÷ (P_cut − C); "unachievable" when P_cut ≤ C; recomputed on the reduced price when the fee is proportional.
-* **Dual timestamps:** every loaded fact has an *occurred* time and an *ingested* time; snapshots can be read "as known then" or "as known now".
-* **Match grade:** SAME (identical product), SIMILAR (brand or spec differs), SUBSTITUTE (same use). Only human-confirmed SAME matches feed margin simulation and alerts.
-* **Data as-of time** is shown beside every price and margin; values older than twice the collection cycle are marked stale and excluded from alerts.
+**정의**
+* **실구매가:** 표시 가격 − 즉시 할인 − 공개 쿠폰 + 배송비. 증정 프로모션은 단위 가격으로 환산합니다(1+1 = 개당 50%). 카드/멤버십 전용 가격은 별도 열에 표시합니다. 비교는 실구매가의 표준 단위 가격으로 합니다.
+* **순마진율:** (P − 매입가 − 물류비 − 플랫폼 수수료 − 폐기비) ÷ P. 폐기비는 SKU 데이터가 없으면 카테고리 평균 폐기율을 SKU에 배분합니다.
+* **BEP 수량:** Q_BEP = Q_현재 × (P_현재 − C) ÷ (P_인하 − C). P_인하 ≤ C이면 "달성 불가"이며, 수수료가 비례 방식이면 인하된 가격에서 다시 계산합니다.
+* **이중 타임스탬프:** 적재된 모든 사실에는 *발생* 시각과 *적재* 시각이 있습니다. 스냅샷은 "그때 알던 대로"나 "지금 아는 대로" 읽을 수 있습니다.
+* **매칭 등급:** SAME(동일 상품), SIMILAR(브랜드나 규격이 다름), SUBSTITUTE(같은 용도). 사람이 확정한 SAME 매칭만 마진 시뮬레이션과 알림에 쓰입니다.
+* **데이터 기준 시각**은 모든 가격과 마진 옆에 표시하며, 수집 주기의 두 배보다 오래된 값은 지연으로 표시하고 알림에서 제외합니다.
 
-**Phases**
-| Phase | Scope | Entry condition |
+**단계**
+| 단계 | 범위 | 진입 조건 |
 | :--- | :--- | :--- |
-| P0 | One category, 100–200 top SKUs with manual matches; ERP/own-mall data; target-SKU price crawler; unit conversion; net margin; price-match simulator (fixed volume, BEP); margin defense line; comparison sheet; permissions and audit | Crawling legal review done; ERP cost items defined |
-| P1 | Auto-match + review queue; search-log and promotion-ledger links; backfill; point-in-time snapshots; category classifier; synonym dictionary; keyword calculations; search–sales gap diagnosis; alerts; promotion calendar; price change approval | P0 margin within ±0.5 pp of finance; crawl success ≥ 95% for 2 weeks |
-| P2 | Flyer parser; banner/exhibition collection; new-product detection; discount-period anomaly detection; sales response scenarios | Auto-match precision ≥ 95%; ≥ 12 months of backfilled data |
+| P0 | 카테고리 하나, 수동 매칭한 상위 SKU 100~200개. ERP/자사몰 데이터, 대상 SKU 가격 크롤러, 단위 환산, 순마진, 가격 맞추기 시뮬레이터(고정 수량, BEP), 마진 방어선, 비교표, 권한과 감사 | 크롤링 법무 검토 완료, ERP 원가 항목 정의 |
+| P1 | 자동 매칭 + 검토 큐, 검색 로그와 프로모션 대장 연계, 백필, 특정 시점 스냅샷, 카테고리 분류기, 동의어 사전, 키워드 계산, 검색-구매 간극 진단, 알림, 프로모션 캘린더, 가격 변경 승인 | P0 마진이 재무와 ±0.5pp 이내, 크롤링 성공률 2주간 95% 이상 |
+| P2 | 전단 파서, 배너/기획전 수집, 신상품 탐지, 할인 기간 이상 탐지, 판매 반응 시나리오 | 자동 매칭 정밀도 95% 이상, 백필 데이터 12개월 이상 |
 
-**Requirements** 
-* **F-08-1 Collection and integration**
-  * F-08-1.1 Per-source connectors with schedules, read-only accounts, retry and alert; last success time and loaded row count shown; source-to-target row difference ≤ 0.1%.
-  * F-08-1.2 Unified schema mapper with versioned rules; unmapped codes listed; unmapped rows excluded from aggregates with their count shown.
-  * F-08-1.3 (P1) Backfill uploader: schema/period/duplicate validation, failed rows downloadable with reasons, re-upload creates no duplicates.
-  * F-08-1.4 (P1) Point-in-time snapshot: restore cost, price and promotion state for any past date; match ERP closing figures on 10 test dates; pre-correction snapshots stay readable.
-  * F-08-1.5 Competitor price crawler for target SKUs: shown price, discount, public coupon, shipping fee, stock-out; request-interval limit; structure-change detection. Core SKUs hourly, others daily. Success ≥ 95% per cycle; failure or structure change alerts within 1 h; 50-sample price accuracy ≥ 99%.
-  * F-08-1.6 (P2) Flyer parser with per-field confidence and a side-by-side review screen; unreviewed data never reaches analysis.
-* **F-08-2 Normalization and matching**
-  * F-08-2.1 Manual SKU matching 1:N with grade, registrant and time; change history; discontinued or URL-changed listings flagged for re-check.
-  * F-08-2.2 Unit conversion to a standard unit; fresh-food attributes (grade, origin, cut) kept; differing attributes cannot be SAME. Error ≤ 1% on 100 samples; unparseable titles listed.
-  * F-08-2.3 Margin simulation and alerts use human-confirmed SAME matches only.
-  * F-08-2.4 (P1) Auto-matching proposes candidates with a score; every candidate needs reviewer approval; precision ≥ 95%, recall ≥ 80%, re-evaluated monthly.
-  * F-08-2.5 (P1) Category classifier to the internal taxonomy; low-confidence items stay unclassified; accuracy ≥ 90% at the lowest level.
-  * F-08-2.6 (P1) Synonym dictionary with change history; changes apply from the next batch and show the number of affected keywords.
-* **F-08-3 Analysis and simulation**
-  * F-08-3.1 Net margin calculator per SKU; SKUs with missing cost items are not calculated and show the reason; ±0.5 pp against finance closing.
-  * F-08-3.2 Price-match simulator: expected net margin and BEP quantity when matching the competitor's effective price; SAME matches only; out-of-stock competitors excluded.
-  * F-08-3.4 Margin defense line: per-category minimum with SKU exceptions, change history, warnings filterable in the sheet.
-  * F-08-3.5 (P2) Sales response scenarios (pessimistic/base/optimistic) from elasticity estimated on past promotions; show the number and span of promotions used; none for SKUs with too little data.
-  * F-08-3.6 (P1) Keyword frequency and share by category with WoW and YoY change.
-  * F-08-3.7 (P1) Search–sales gap diagnosis: high-search, low-conversion keywords get a primary cause in this order — no product, out of stock, price disadvantage, other — with the remaining matches shown as secondary causes; ≥ 85% classification accuracy on 100 samples.
-  * F-08-3.8 (P2) New-product detector; renamed existing products flagged as new ≤ 10%.
-  * F-08-3.9 (P2) Discount anomaly detection: failed promotion (volume below baseline of the previous four weeks, same weekday, seasonally adjusted) and prolonged discount (discount-day share over 90 days above threshold); each detection shows baseline, actual and rationale.
-* **F-08-4 Dashboard and administration**
-  * F-08-4.1 Comparison sheet: own price, competitor effective price and unit price, current margin, expected margin at matching, BEP quantity, match grade, as-of time; sort, filter, export (authorized users only, audited); all target SKUs load in ≤ 3 s.
-  * F-08-4.2 Data source screen: connection state, last success, failure reason, crawl URLs and cycles; URLs validated before saving; changes recorded.
-  * F-08-4.3 (P1) Keyword/status overview with search–sales gap quadrant chart linking to keyword detail.
-  * F-08-4.4 (P1) Promotion calendar with own and competitor promotions on one axis and a year-over-year overlay.
-  * F-08-4.5 (P1) Alerts for reverse-margin risk, competitor lowest-price update and core-keyword stock-out; per-type thresholds; one alert per SKU and type per 24 h; normal severity sent as a daily digest; **alert bodies contain no cost or margin figures, only a link to the screen**.
-  * F-08-4.6 (P1) Price change approval: draft in the sheet → approver review → export after approval; drafts below the defense line need a higher approver; author, approver and evidence snapshot are kept. Automatic write-back to the price system is out of scope (the engine stays advisory; F-04-0 auto-apply is not part of this release).
-* **F-08-N Non-functional**
-  * F-08-N1 Separate permissions for viewing cost/margin, exporting, setting defense lines and approving price changes; company SSO.
-  * F-08-N2 Audit log for views, downloads, setting changes, match changes and approvals with user, time and target; retention per company policy.
-  * F-08-N3 (P1) De-identify search and order logs; filter personal data (phone numbers, addresses) in queries before loading.
-  * F-08-N4 Credentials in a secret store; source systems accessed with read-only accounts.
-  * F-08-N5 Daily data-quality metrics (collection success, load delay, unmapped codes, unit-parse failures, matches to re-check) with operator alerts on threshold breach.
-  * F-08-N6 Staleness: a value older than twice its collection cycle is shown as stale and excluded from alert decisions.
-  * F-08-N7 Dashboard availability 99% in business hours; collection failure never blocks reads.
-  * F-08-N8 Crawl only legally reviewed targets and methods; no login areas, no personal data; request-rate cap.
+**요구사항**
+* **F-08-1 수집과 통합**
+  * F-08-1.1 일정, 읽기 전용 계정, 재시도와 알림이 있는 출처별 커넥터. 마지막 성공 시각과 적재 행 수 표시. 출처와 목적지의 행 수 차이 0.1% 이하.
+  * F-08-1.2 규칙 버전이 있는 통합 스키마 매퍼. 매핑되지 않은 코드 목록 표시. 매핑되지 않은 행은 집계에서 제외하고 그 수를 표시.
+  * F-08-1.3 (P1) 백필 업로더: 스키마/기간/중복 검증, 실패 행을 사유와 함께 내려받기, 재업로드해도 중복이 생기지 않음.
+  * F-08-1.4 (P1) 특정 시점 스냅샷: 과거 임의의 날짜의 원가, 가격, 프로모션 상태 복원. 테스트 날짜 10일에서 ERP 마감 수치와 일치. 정정 전 스냅샷도 계속 읽을 수 있음.
+  * F-08-1.5 대상 SKU 경쟁사 가격 크롤러: 표시 가격, 할인, 공개 쿠폰, 배송비, 품절. 요청 간격 제한. 구조 변경 탐지. 핵심 SKU는 매시간, 나머지는 매일. 주기당 성공률 95% 이상. 실패나 구조 변경은 1시간 안에 알림. 50개 표본 가격 정확도 99% 이상.
+  * F-08-1.6 (P2) 필드별 신뢰도와 나란히 보는 검토 화면이 있는 전단 파서. 검토되지 않은 데이터는 분석에 닿지 않음.
+* **F-08-2 정규화와 매칭**
+  * F-08-2.1 등급, 등록자, 시각이 있는 1:N 수동 SKU 매칭. 변경 이력. 단종되거나 URL이 바뀐 상품은 재확인 대상으로 표시.
+  * F-08-2.2 표준 단위로 단위 환산. 신선식품 속성(등급, 원산지, 부위) 보존. 속성이 다르면 SAME이 될 수 없음. 표본 100개에서 오차 1% 이하. 파싱하지 못한 제목은 목록으로 표시.
+  * F-08-2.3 마진 시뮬레이션과 알림은 사람이 확정한 SAME 매칭만 사용.
+  * F-08-2.4 (P1) 자동 매칭이 점수와 함께 후보를 제안. 모든 후보는 검토자 승인 필요. 정밀도 95% 이상, 재현율 80% 이상, 매월 재평가.
+  * F-08-2.5 (P1) 내부 분류 체계로 가는 카테고리 분류기. 신뢰도가 낮은 항목은 미분류로 둠. 최하위 수준 정확도 90% 이상.
+  * F-08-2.6 (P1) 변경 이력이 있는 동의어 사전. 변경은 다음 배치부터 적용되며 영향받는 키워드 수를 표시.
+* **F-08-3 분석과 시뮬레이션**
+  * F-08-3.1 SKU별 순마진 계산기. 원가 항목이 빠진 SKU는 계산하지 않고 사유를 표시. 재무 마감과 ±0.5pp.
+  * F-08-3.2 가격 맞추기 시뮬레이터: 경쟁사의 실구매가에 맞췄을 때의 예상 순마진과 BEP 수량. SAME 매칭만 사용. 품절된 경쟁사는 제외.
+  * F-08-3.4 마진 방어선: SKU 예외가 있는 카테고리별 최소값, 변경 이력, 비교표에서 필터할 수 있는 경고.
+  * F-08-3.5 (P2) 과거 프로모션으로 추정한 탄력성에서 나오는 판매 반응 시나리오(보수/기본/낙관). 사용한 프로모션의 수와 기간을 표시. 데이터가 너무 적은 SKU에는 제공하지 않음.
+  * F-08-3.6 (P1) 카테고리별 키워드 빈도와 점유율, WoW와 YoY 변화.
+  * F-08-3.7 (P1) 검색-구매 간극 진단: 검색은 많고 전환이 낮은 키워드에 주된 원인을 다음 순서로 붙임 — 상품 없음, 품절, 가격 열세, 기타. 나머지 일치 항목은 보조 원인으로 표시. 표본 100개에서 분류 정확도 85% 이상.
+  * F-08-3.8 (P2) 신상품 탐지기. 이름만 바뀐 기존 상품을 신상품으로 표시하는 비율 10% 이하.
+  * F-08-3.9 (P2) 할인 이상 탐지: 실패한 프로모션(직전 4주 같은 요일의 계절 보정한 기준선보다 낮은 판매량)과 장기 할인(90일 중 할인일 비율이 임계값 초과). 탐지마다 기준선, 실제 값, 근거를 표시.
+* **F-08-4 대시보드와 관리**
+  * F-08-4.1 비교표: 내 가격, 경쟁사 실구매가와 단위 가격, 현재 마진, 맞췄을 때 예상 마진, BEP 수량, 매칭 등급, 기준 시각. 정렬, 필터, 내보내기(권한 있는 사용자만, 감사 기록). 모든 대상 SKU가 3초 이내에 로드.
+  * F-08-4.2 데이터 소스 화면: 연결 상태, 마지막 성공, 실패 사유, 크롤링 URL과 주기. 저장 전 URL 검증. 변경 기록.
+  * F-08-4.3 (P1) 키워드 상세로 연결되는 검색-구매 간극 사분면 차트가 있는 키워드/상태 개요.
+  * F-08-4.4 (P1) 자사와 경쟁사 프로모션을 한 축에 놓고 전년 대비를 겹쳐 보는 프로모션 캘린더.
+  * F-08-4.5 (P1) 역마진 위험, 경쟁사 최저가 갱신, 핵심 키워드 품절 알림. 유형별 임계값. SKU와 유형당 24시간에 한 번. 보통 심각도는 일일 요약으로 발송. **알림 본문에는 원가나 마진 수치 없이 화면 링크만 담음.**
+  * F-08-4.6 (P1) 가격 변경 승인: 비교표에서 초안 작성 → 승인자 검토 → 승인 후 내보내기. 방어선 아래 초안은 더 높은 승인자가 필요. 작성자, 승인자, 근거 스냅샷을 보관. 가격 시스템에 자동으로 쓰는 것은 범위 밖(엔진은 보조 역할을 유지하며 F-04-0의 자동 적용은 이번 릴리스에 포함하지 않음).
+* **F-08-N 비기능**
+  * F-08-N1 원가/마진 조회, 내보내기, 방어선 설정, 가격 변경 승인 권한을 분리. 회사 SSO.
+  * F-08-N2 조회, 다운로드, 설정 변경, 매칭 변경, 승인에 대해 사용자, 시각, 대상을 담은 감사 로그. 보존 기간은 회사 정책을 따름.
+  * F-08-N3 (P1) 검색 및 주문 로그를 비식별화하고 적재 전에 질의의 개인정보(전화번호, 주소)를 걸러냄.
+  * F-08-N4 자격 증명은 시크릿 저장소에 보관. 원천 시스템은 읽기 전용 계정으로 접근.
+  * F-08-N5 일일 데이터 품질 지표(수집 성공, 적재 지연, 매핑되지 않은 코드, 단위 파싱 실패, 재확인할 매칭)와 임계값을 넘으면 운영자 알림.
+  * F-08-N6 지연 처리: 수집 주기의 두 배보다 오래된 값은 지연으로 표시하고 알림 판단에서 제외.
+  * F-08-N7 업무 시간 대시보드 가용성 99%. 수집 실패가 조회를 막지 않음.
+  * F-08-N8 법무 검토를 마친 대상과 방법만 크롤링. 로그인 영역과 개인정보는 대상이 아님. 요청 속도 상한.
 
 
-### 4.1 F-08 implementation status (checked against the code on 2026-11-13)
-**Done** = implemented and covered by tests; **Partial** = part of it exists; **Missing** = not implemented. Nothing here has been run against live services (real KAMIS/Garak/OpenAI/Slack), MySQL, Docker or a real browser; tests use SQLite, fixtures, fake APIs and jsdom.
+### 4.1 F-08 구현 현황 (2026-11-13 코드 기준 확인)
+**Done** = 구현되었고 테스트로 검증됨. **Partial** = 일부만 있음. **Missing** = 구현되지 않음. 이 표의 어떤 것도 실제 서비스(실제 KAMIS/가락시장/OpenAI/Slack), MySQL, Docker, 실제 브라우저에서는 실행해 보지 못했습니다. 테스트는 SQLite, 픽스처, 가짜 API, jsdom을 씁니다.
 
-| Status | Requirements |
+| 상태 | 요구사항 |
 | :--- | :--- |
-| **Done** | **1.4** point-in-time snapshots (occurred vs. ingested time, `cli snapshot`, `/snapshot`) · **1.5** coupon, shipping fee and bonus quantity stored; effective unit price used for comparison · **2.1** match grades, Product matches screen, audited changes · **2.3** confirmed SAME matches only · **2.5** category classifier with `classify-eval` · **2.6** synonym dictionary with impact count and history · **3.2** price-match simulator with expected margin and BEP · **3.3** effective purchase price · **1.6** flyer images read with the OpenAI API, per-item confidence, side-by-side review, only approved items reach analysis (PDF input not supported) · **3.5** sales response scenarios from the category's own measured promotions (needs ≥ 3; shows number and span) · **3.8** new-product detector (renames excluded) · **3.9** discount anomalies: failed promotion against a same-weekday baseline, prolonged discount share · **3.6** keyword share with WoW/YoY · **3.7** search–sales gap diagnosis (Search gap tab) · **4.1** comparison sheet with expected margin and BEP, audited CSV export · **4.6** price-change draft → approve → apply with evidence snapshot and (team mode) admin approval below the defense line · **N3** personal-data filter on MI import · **N5** daily quality report and alerts, status strip · **N7** · **N8** |
-| **Partial** | **1.1** ERP data arrives as CSV/XLSX, not a read-only DB connector · **1.2** header aliases and review queue, no rule versioning · **1.3** MI import is an idempotent upsert with line-numbered errors (CLI `--errors-file`); no downloadable failure file in the API, no sales/discount history backfill · **2.2** unit conversion done, attributes (grade/origin/cut) are not compared · **2.4** auto-match suggestions with a review queue; precision and recall are not measured · **3.1** net margin with disposal cost; the VAT basis and ±0.5 pp finance reconciliation are open · **3.4** per-category minimum margin and audited floor override; no screen for defense lines · **4.2** crawler pages with status, schedule and audited changes; retail target URLs live in `config/extraction.json` · **4.3** Category health, Trend radar and Search gap tabs; no gap quadrant chart · **4.4** promotion calendar (manual entry, 90 days back and 30 ahead); no competitor collection, no year-over-year overlay · **4.5** figure-free alerts, 24 h dedupe, opt-in daily digest; no per-type thresholds · **N1** three roles with category scope; no separable permissions or SSO · **N2** writes and exports are audited; views are not · **N4** secrets in `settings.toml` or the environment; no secret manager · **N6** competitor data older than 24 h is excluded from decisions and crawlers are marked stale after twice their cycle; no per-value staleness mark |
-| **Missing** | PDF flyers; banner/exhibition pages are read only as images; accuracy targets (new-product rename rate ≤ 10%, 3.7/2.5 sample accuracy) are not measured on real data |
+| **Done** | **1.4** 특정 시점 스냅샷(발생 대 적재 시각, `cli snapshot`, `/snapshot`) · **1.5** 쿠폰, 배송비, 증정 수량 저장, 비교에 실구매 단위 가격 사용 · **1.6** OpenAI API로 전단 이미지 읽기, 항목별 신뢰도, 나란히 보는 검토, 승인된 항목만 분석에 반영(PDF 입력은 미지원) · **2.1** 매칭 등급, 상품 매칭 화면, 감사 기록 · **2.3** 확정된 SAME 매칭만 사용 · **2.5** `classify-eval`이 있는 카테고리 분류기 · **2.6** 영향 건수와 이력이 있는 동의어 사전 · **3.2** 예상 마진과 BEP가 있는 가격 맞추기 시뮬레이터 · **3.3** 실구매가 · **3.5** 해당 카테고리에서 측정된 프로모션으로 만든 판매 반응 시나리오(3건 이상 필요, 건수와 기간 표시) · **3.6** WoW/YoY가 있는 키워드 점유율 · **3.7** 검색-구매 간극 진단(검색 간극 탭) · **3.8** 신상품 탐지기(이름 변경 제외) · **3.9** 할인 이상: 같은 요일 기준선 대비 실패한 프로모션, 장기 할인 비율 · **4.1** 예상 마진과 BEP가 있는 비교표, 감사 기록이 남는 CSV 내보내기 · **4.6** 근거 스냅샷이 있는 가격 변경 초안 → 승인 → 적용, (팀 모드에서) 방어선 아래는 관리자 승인 · **N3** MI 가져오기의 개인정보 필터 · **N5** 일일 품질 보고와 알림, 상태 띠 · **N7** · **N8** |
+| **Partial** | **1.1** ERP 데이터는 읽기 전용 DB 커넥터가 아니라 CSV/XLSX로 들어옴 · **1.2** 헤더 별칭과 검토 큐가 있고 규칙 버전은 없음 · **1.3** MI 가져오기는 줄 번호 오류가 있는 멱등 upsert(CLI `--errors-file`), API에는 내려받을 수 있는 실패 파일이 없고 판매/할인 이력 백필도 없음 · **2.2** 단위 환산은 되고 속성(등급/원산지/부위)은 비교하지 않음 · **2.4** 검토 큐가 있는 자동 매칭 제안, 정밀도와 재현율은 측정하지 않음 · **3.1** 폐기비가 포함된 순마진, VAT 기준과 재무와의 ±0.5pp 대조는 미결 · **3.4** 카테고리별 최소 마진과 감사 기록이 남는 바닥가 재정의, 방어선 화면은 없음 · **4.2** 상태, 일정, 감사 기록이 남는 변경이 있는 크롤러 페이지, 소매 대상 URL은 `config/extraction.json`에 있음 · **4.3** 카테고리 헬스, 트렌드 레이더, 검색 간극 탭이 있고 간극 사분면 차트는 없음 · **4.4** 프로모션 캘린더(수동 입력, 90일 전부터 30일 후까지), 경쟁사 수집과 전년 대비 겹쳐 보기는 없음 · **4.5** 수치 없는 알림, 24시간 중복 제거, 선택형 일일 요약, 유형별 임계값은 없음 · **N1** 카테고리 범위가 있는 세 역할, 분리된 권한과 SSO는 없음 · **N2** 쓰기와 내보내기는 감사 기록이 남고 조회는 남지 않음 · **N4** 비밀 값은 `settings.toml`이나 환경변수에 있고 시크릿 매니저는 없음 · **N6** 24시간보다 오래된 경쟁사 데이터는 의사결정에서 제외하고 크롤러는 주기의 두 배가 지나면 지연으로 표시, 값 단위 지연 표시는 없음 |
+| **Missing** | PDF 전단. 배너/기획전 화면은 이미지로만 읽음. 정확도 목표(신상품 이름 변경 오탐 10% 이하, 3.7/2.5 표본 정확도)는 실제 데이터로 측정하지 못함 |
 
-**Decisions taken**
-* Alerts carry no cost, margin or price figures, only a link (`[server] public_url`).
-* Only human-confirmed SAME matches count toward recommendations, the matrix and alerts.
-* The engine stays advisory: no write-back to sales channels; F-04-0 auto-apply is out of scope.
-* Solo mode (`[approval] solo_mode`, default on): one person may approve their own proposals, including below the defense line (still flagged and audited). Team mode (`false`) enforces author ≠ approver and admin approval below the line.
+**내린 결정**
+* 알림에는 원가, 마진, 가격 수치가 없고 링크(`[server] public_url`)만 있습니다.
+* 사람이 확정한 SAME 매칭만 추천, 매트릭스, 알림에 반영합니다.
+* 엔진은 보조 역할을 유지합니다. 판매 채널에 쓰지 않으며 F-04-0 자동 적용은 범위 밖입니다.
+* 혼자 쓰기 모드(`[approval] solo_mode`, 기본 켜짐): 한 사람이 자기 제안을 승인할 수 있고 방어선 아래 제안도 가능합니다(표시와 감사 기록은 그대로). 팀 모드(`false`)는 작성자 ≠ 승인자와 방어선 아래 관리자 승인을 강제합니다.
 
-**Still open (needs a business answer)**
-* VAT basis: the spec divides by the selling price and leaves VAT open; the engine divides by the VAT-exclusive price, so rates differ by about 10% relative until one basis is fixed.
-* Collection cadence: the spec wants core SKUs hourly; retail runs at 08:00, 13:00 and 19:00 KST (hourly raises load and the legal review burden per platform).
-* Disposal-cost source, minimum margins per category, whether card or membership prices count, and the first category and scale (spec §9).
+**아직 결정이 필요한 것 (업무 답변 필요)**
+* VAT 기준: 명세서는 판매가로 나누고 VAT는 미정으로 두었고, 엔진은 VAT 제외 가격으로 나누므로 기준이 하나로 정해지기 전까지 비율이 상대적으로 약 10% 다릅니다.
+* 수집 주기: 명세서는 핵심 SKU를 매시간으로 원하지만 소매 수집은 KST 08:00, 13:00, 19:00입니다(매시간으로 하면 부하와 플랫폼별 법무 검토 부담이 늘어납니다).
+* 폐기비 출처, 카테고리별 최소 마진, 카드/멤버십 가격 포함 여부, 첫 카테고리와 규모(명세서 §9).
 
 ---
 
-## 5. Non-Functional & Operational Requirements
+## 5. 비기능 및 운영 요구사항
 
-### 5.1 Performance & Scalability (N-01)
-* **Storage Partitioning:** `ext_public_benchmarks`, `ext_retail_prices`, and `int_operations_inventory` are partitioned using MySQL `RANGE PARTITIONING` based on date:
+### 5.1 성능과 확장성 (N-01)
+* **스토리지 파티셔닝:** `ext_public_benchmarks`, `ext_retail_prices`, `int_operations_inventory`는 날짜 기준 MySQL `RANGE PARTITIONING`으로 파티션합니다.
   ```sql
-  -- recorded_date tables (DATE)
+  -- recorded_date 테이블 (DATE)
   PARTITION BY RANGE COLUMNS (recorded_date) (
     PARTITION p202601 VALUES LESS THAN ('2026-02-01'), ...
   )
-  -- ext_retail_prices (DATETIME, partition key scraped_at)
+  -- ext_retail_prices (DATETIME, 파티션 키 scraped_at)
   PARTITION BY RANGE (TO_DAYS(scraped_at)) ( ... )
   ```
-  Both forms support partition pruning on range predicates (a composite `YEAR()*100+MONTH()` expression does not). A scheduled job pre-creates the next 3 monthly partitions. Composite indexes: `(std_item_id, recorded_date)` / `(std_item_id, scraped_at)`.
-* **Query Latency (single reference definition):**
-  | Dataset | Query | Target |
+  두 형식 모두 범위 조건에서 파티션 프루닝을 지원합니다(`YEAR()*100+MONTH()` 같은 복합 식은 지원하지 않음). 예약 작업이 다음 3개월 파티션을 미리 만듭니다. 복합 인덱스: `(std_item_id, recorded_date)` / `(std_item_id, scraped_at)`.
+* **쿼리 지연(단일 기준 정의):**
+  | 데이터셋 | 쿼리 | 목표 |
   | :--- | :--- | :--- |
-  | 10M+ rows | Multi-year analytical query on `(std_item_id, recorded_date)` | $\le 2.0\text{ s}$ |
-  | 5M rows / 24 partitions | Single-item 90-day time-series (stress test) | $< 500\text{ ms}$, `EXPLAIN` shows pruning |
-  | Small mock set | Repository-layer integration query | $\le 200\text{ ms}$ |
+  | 1천만 행 이상 | `(std_item_id, recorded_date)` 기준 다년 분석 쿼리 | $\le 2.0\text{ s}$ |
+  | 500만 행 / 파티션 24개 | 단일 품목 90일 시계열(스트레스 테스트) | $< 500\text{ ms}$, `EXPLAIN`에서 프루닝 확인 |
+  | 작은 목 데이터셋 | 리포지토리 계층 통합 쿼리 | $\le 200\text{ ms}$ |
 
-### 5.2 Containerization & Deployment (N-02)
-* The entire system must launch deterministically from a clean state using a single command:
+### 5.2 컨테이너화와 배포 (N-02)
+* 전체 시스템은 깨끗한 상태에서 명령 하나로 결정적으로 기동해야 합니다.
   ```bash
   docker-compose up --build -d
   ```
 
-### 5.3 Security, Integrity & Access Control (N-03)
-* **Authentication:** JWT-based sessions issued after login (OIDC/SSO-compatible); tokens short-lived with refresh; all API routes require authentication except health checks.
-* **RBAC matrix:**
-  | Capability | ADMIN | MD | BUYER |
+### 5.3 보안, 무결성, 접근 제어 (N-03)
+* **인증:** 로그인 후 발급하는 JWT 기반 세션(OIDC/SSO 호환). 토큰은 수명이 짧고 갱신 가능하며, 헬스 체크를 제외한 모든 API 경로는 인증이 필요합니다.
+* **RBAC 매트릭스:**
+  | 기능 | ADMIN | MD | BUYER |
   | :--- | :---: | :---: | :---: |
-  | View public benchmarks / competitor prices | ✔ | ✔ | ✔ |
-  | View COGS, cost sheets, margins | ✔ | ✔ (assigned categories) | ✘ (masked) |
-  | Approve/reject price recommendations | ✔ | ✔ (assigned categories) | ✘ |
-  | Edit floors, auto-apply guards, strategies | ✔ | ✘ | ✘ |
-  | Approve selectors / product matches | ✔ | ✔ | ✘ |
-  | Manage users & assignments | ✔ | ✘ | ✘ |
-  Masking is enforced server-side in the API layer (fields omitted, not merely hidden in the UI).
-* **Credentials:** No secrets in source control. Verified via pre-commit git-secrets hooks.
+  | 공개 벤치마크 / 경쟁사 가격 조회 | ✔ | ✔ | ✔ |
+  | COGS, 원가표, 마진 조회 | ✔ | ✔ (배정된 카테고리) | ✘ (가림) |
+  | 가격 추천 승인/반려 | ✔ | ✔ (배정된 카테고리) | ✘ |
+  | 바닥가, 자동 적용 가드, 전략 수정 | ✔ | ✘ | ✘ |
+  | 셀렉터 / 상품 매칭 승인 | ✔ | ✔ | ✘ |
+  | 사용자와 배정 관리 | ✔ | ✘ | ✘ |
+  가림 처리는 API 계층에서 서버가 강제합니다(필드를 단지 UI에서 숨기는 것이 아니라 응답에서 뺍니다).
+  혼자 쓰기 모드(`[approval] solo_mode`, 기본 켜짐)는 한 사람이 자기 제안을 승인하게 합니다. 팀 모드에서는 작성자가 자기 제안을 승인할 수 없고, 방어선 아래 제안은 ADMIN만 승인합니다.
+* **자격 증명:** 소스 관리에 비밀 값을 두지 않습니다. pre-commit git-secrets 훅으로 확인합니다.
 
-### 5.4 Reliability, Observability & Data Lifecycle (N-04)
-* **Observability:** Structured JSON logs with correlation IDs per job run; metrics for scrape success rate, LLM-fallback rate, quarantined-record count, job duration, and alert delivery; health/readiness endpoints for every service.
-* **Scraper failure behavior:** Per-connector retry with backoff; a connector failing for 3 consecutive scheduled runs raises an alert and stale data is marked (`data_age` shown in the UI); decisions MUST NOT use competitor data older than 24h.
-* **Backup & retention:** Daily MySQL logical backup with restore tested monthly; retention default 3 years for time-series tables (older partitions archived/dropped); `audit_log` retained indefinitely.
-* **Availability target:** Dashboard/API 99.5% monthly; collection jobs are idempotent and safe to re-run.
+### 5.4 신뢰성, 관측성, 데이터 수명주기 (N-04)
+* **관측성:** 작업 실행마다 상관관계 ID가 있는 구조화 JSON 로그. 스크래핑 성공률, LLM 대체 비율, 격리된 레코드 수, 작업 소요 시간, 알림 전달에 대한 지표. 모든 서비스의 헬스/준비 엔드포인트.
+* **스크래퍼 실패 동작:** 커넥터별 백오프 재시도. 커넥터가 예약 실행 3번 연속 실패하면 알림을 내고 오래된 데이터를 표시합니다(UI에 `data_age` 표시). 의사결정은 24시간보다 오래된 경쟁사 데이터를 써서는 안 됩니다.
+* **백업과 보존:** 매일 MySQL 논리 백업, 매월 복원 테스트. 시계열 테이블 보존 기본 3년(오래된 파티션은 보관/삭제). `audit_log`는 무기한 보존.
+* **가용성 목표:** 대시보드/API 월 99.5%. 수집 작업은 멱등이며 다시 실행해도 안전합니다.
 
 ---
 
-## 6. Testability Specifications & Verification Harness
+## 6. 테스트 용이성 명세와 검증 하네스
 
-To ensure the system can be validated automatically by an individual developer, the architecture mandates dedicated testing interfaces.
+개별 개발자가 시스템을 자동으로 검증할 수 있도록, 아키텍처는 전용 테스트 인터페이스를 요구합니다.
 
-### 6.1 Testing Tier Requirements
+### 6.1 테스트 계층 요구사항
 
-| Test Tier | Scope | Target Tech Stack | Pass Criteria |
+| 테스트 계층 | 범위 | 대상 기술 | 통과 기준 |
 | :--- | :--- | :--- | :--- |
-| **Unit Test** | Unit conversion parser, margin formulas, Run-rate logic, pricing strategy | `pytest`, `pytest-mock` | $100\%$ formula edge coverage; all money math in `Decimal`, exact equality except unit-price rounding (±0.01 KRW) |
-| **Integration Test** | Repository layer, range partitions, DB indexing | `pytest`, Testcontainers (MySQL) | Partition pruning verified; query latency per §5.1 table; logical-FK orphan checks pass |
-| **Contract / AI Test**| Self-healing JSON fallback, LLM schema conformance | `pytest`, VCR.py / recorded fixtures | $100\%$ schema validity on mocked malformed HTML inputs |
-| **E2E Pipeline Test** | Search -> Scrape -> Self-Heal -> DB -> UI Matrix API | Playwright mock server + FastAPI TestClient | Full run completes without unhandled exceptions |
+| **단위 테스트** | 단위 환산 파서, 마진 공식, 런레이트 로직, 가격 전략 | `pytest`, `pytest-mock` | 공식의 경계 사례 $100\%$ 커버. 모든 금액 계산은 `Decimal`이며 단위 가격 반올림(±0.01 KRW)을 빼고는 정확히 같아야 함 |
+| **통합 테스트** | 리포지토리 계층, 범위 파티션, DB 인덱싱 | `pytest`, Testcontainers (MySQL) | 파티션 프루닝 확인, §5.1 표의 쿼리 지연, 논리 FK 고아 검사 통과 |
+| **계약 / AI 테스트** | 자가 복구 JSON 대체 경로, LLM 스키마 적합성 | `pytest`, VCR.py / 녹화된 픽스처 | 변형된 HTML 목 입력에서 스키마 유효성 $100\%$ |
+| **E2E 파이프라인 테스트** | 검색 -> 수집 -> 자가 복구 -> DB -> UI 매트릭스 API | Playwright 목 서버 + FastAPI TestClient | 처리되지 않은 예외 없이 전체 실행이 끝남 |
 
-### 6.2 Testability Hooks & Mock Injection Points
+### 6.2 테스트 훅과 목 주입 지점
 
-1. **Scraper Pluggable Network Transports:**
-   * The scraper engine must support a decoupled network transport adapter. During automated tests, network calls are redirected to a local `WireMock` or static fixture directory serving pre-recorded e-commerce HTML snapshots.
-2. **Deterministic Time Provider:**
-   * Time-sensitive functions (e.g., $D\text{-Day}$ calculation, Run-rate, partition targeting) must consume a mockable `TimeProvider` interface rather than system clock (`datetime.now()`).
-3. **LLM Cost & Response Stubbing:**
-   * The Self-Healing subsystem must implement an offline mock mode (`MOCK_LLM=true`) returning deterministic JSON payloads to permit continuous CI testing without invoking paid APIs.
+1. **스크래퍼 교체 가능한 네트워크 전송:**
+   * 스크래퍼 엔진은 분리된 네트워크 전송 어댑터를 지원해야 합니다. 자동 테스트에서는 네트워크 호출을 로컬 `WireMock`이나, 미리 녹화한 이커머스 HTML 스냅샷을 제공하는 정적 픽스처 디렉터리로 돌립니다.
+2. **결정적 시간 제공자:**
+   * 시간에 민감한 함수($D\text{-Day}$ 계산, 런레이트, 파티션 대상 선정 등)는 시스템 시계(`datetime.now()`)가 아니라 목으로 바꿀 수 있는 `TimeProvider` 인터페이스를 써야 합니다.
+3. **LLM 비용과 응답 스텁:**
+   * 자가 복구 하위 시스템은 유료 API를 호출하지 않고도 CI를 계속 돌릴 수 있도록 결정적 JSON을 돌려주는 오프라인 목 모드(`MOCK_LLM=true`)를 구현해야 합니다.
 
-### 6.3 Test Verification Matrix
+### 6.3 테스트 검증 매트릭스
 
-| Requirement ID | Verification Method | Acceptance Test Description |
+| 요구사항 ID | 검증 방법 | 인수 테스트 설명 |
 | :--- | :--- | :--- |
-| **F-02-1 / F-02-2** | Automated Integration | Inject HTML with mutated class names. Assert that CSS selectors fail, `ScrapeExtractionFault` is caught, LLM fallback is triggered, and valid JSON is parsed into the database. |
-| **F-03-1** | Automated Unit | Pass an array of 50 edge-case title strings (e.g., `"1.2kg(600g x 2)"`, `"500ml x 6"`, `"휴지 30롤"` → per `1unit`). Titles whose unit cannot be resolved (e.g., `"30m 30rolls"`) MUST return an explicit `UNPARSEABLE` result and be routed to review, not guessed. Assert calculated `normalized_unit_price` matches expected value within $\pm 0.01\text{ KRW}$. |
-| **F-03-2 / F-04-1** | Automated Unit | Simulate scenario where competitor price drops by $40\%$. Verify that suggested price does not breach `min_price_floor` and `REVERSE_MARGIN_WARNING` is raised. |
-| **F-04-2** | Automated Unit | Set available inventory $= 500$, 3-day avg sales $= 50$ (Run-rate $= 10\text{ days}$). Set $D\text{-Day} = 5\text{ days}$. Verify `SPOILAGE_RISK_FLAG` asserts `TRUE`. |
-| **N-01** | Automated Stress | Seed `ext_retail_prices` with 5,000,000 synthetic rows across 24 monthly partitions (and a 10M-row run for the 2.0 s analytical target). Execute single-item 90-day time-series query. Verify `EXPLAIN` shows partition pruning and execution time $< 500\text{ms}$. |
-| **F-02-4** | Automated Contract | Feed LLM mock output with `sale_price = 0`, `sale_price > original_price`, and a +300% jump. Assert each is quarantined and not written to `ext_retail_prices`. |
-| **F-03-3** | Automated Unit | Daily sales $= 0$ → Run-rate `INFINITE`; only 2 days of history → average over 2 days; no division error. |
-| **F-04-0 / F-04-1** | Automated Unit/Integration | Default mode creates `PENDING` recommendations only; step cap, cool-down and wholesale guard honored; approve → `APPLIED` with `audit_log` entry; revert restores prior price. |
-| **F-04-3** | Automated Unit | Competitor out of stock, Run-rate $= 10$, $D$-Day $= 5$ → no upward recommendation (spoilage precedence). |
-| **F-05-1 / N-03** | Automated API | BUYER token receives no cost/margin fields; MD sees only assigned categories; ADMIN-only endpoints return 403 for others. |
-| **F-05-3** | Automated Integration | Duplicate trigger within suppression window sends one alert; webhook failure retries then dead-letters. |
-| **F-01-3** | Automated Integration | Upload CSV/XLSX with valid, malformed, and duplicate rows; valid rows load, invalid rows reported with line numbers. |
+| **F-02-1 / F-02-2** | 자동 통합 | 클래스명을 바꾼 HTML을 주입합니다. CSS 셀렉터가 실패하고, `ScrapeExtractionFault`가 잡히고, LLM 대체 경로가 작동하고, 유효한 JSON이 파싱되어 데이터베이스에 들어가는지 확인합니다. |
+| **F-03-1** | 자동 단위 | 경계 사례 제목 문자열 50개(예: `"1.2kg(600g x 2)"`, `"500ml x 6"`, `"휴지 30롤"` → `1unit`당)를 넘깁니다. 단위를 풀 수 없는 제목(예: `"30m 30rolls"`)은 추측하지 말고 명시적인 `UNPARSEABLE` 결과를 돌려주고 검토로 보내야 합니다. 계산된 `normalized_unit_price`가 기대값과 $\pm 0.01\text{ KRW}$ 안에서 일치하는지 확인합니다. |
+| **F-03-2 / F-04-1** | 자동 단위 | 경쟁사 가격이 $40\%$ 떨어지는 시나리오를 시뮬레이션합니다. 제안 가격이 `min_price_floor`를 넘지 않고 `REVERSE_MARGIN_WARNING`이 발생하는지 확인합니다. |
+| **F-04-2** | 자동 단위 | 가용 재고 $= 500$, 3일 평균 판매 $= 50$(런레이트 $= 10\text{일}$), $D\text{-Day} = 5\text{일}$로 둡니다. `SPOILAGE_RISK_FLAG`가 `TRUE`가 되는지 확인합니다. |
+| **N-01** | 자동 스트레스 | 24개 월별 파티션에 걸쳐 합성 행 5,000,000개를 `ext_retail_prices`에 넣습니다(2.0초 분석 목표용으로는 1천만 행 실행도). 단일 품목 90일 시계열 쿼리를 실행하고, `EXPLAIN`에서 파티션 프루닝이 보이고 실행 시간이 $< 500\text{ms}$인지 확인합니다. |
+| **F-02-4** | 자동 계약 | `sale_price = 0`, `sale_price > original_price`, +300% 급등인 LLM 목 출력을 넣습니다. 각각 격리되고 `ext_retail_prices`에 쓰이지 않는지 확인합니다. |
+| **F-03-3** | 자동 단위 | 일 판매 $= 0$ → 런레이트 `INFINITE`. 이력이 2일뿐이면 2일 평균. 0으로 나누는 오류 없음. |
+| **F-04-0 / F-04-1** | 자동 단위/통합 | 기본 모드는 `PENDING` 추천만 만듭니다. 이동 폭 제한, 쿨다운, 도매 보호가 지켜집니다. 승인 → `APPLIED`와 `audit_log` 기록. 되돌리기는 이전 가격을 복원합니다. |
+| **F-04-3** | 자동 단위 | 경쟁사 품절, 런레이트 $= 10$, $D$-Day $= 5$ → 인상 추천 없음(폐기 위험 우선). |
+| **F-05-1 / N-03** | 자동 API | BUYER 토큰은 원가/마진 필드를 받지 못합니다. MD는 배정된 카테고리만 봅니다. ADMIN 전용 엔드포인트는 다른 사용자에게 403을 돌려줍니다. |
+| **F-05-3** | 자동 통합 | 억제 구간 안의 중복 트리거는 알림을 한 번만 보냅니다. 웹훅이 실패하면 재시도 후 폐기 처리합니다. |
+| **F-01-3** | 자동 통합 | 유효, 잘못된, 중복 행이 섞인 CSV/XLSX를 업로드합니다. 유효한 행은 적재되고 잘못된 행은 줄 번호와 함께 보고됩니다. |
 
 ---
 
-## 7. Implementation Roadmap & Milestones
+## 7. 구현 로드맵과 마일스톤
 
-* **Phase 1: Foundation, DB Engine & Public Ingestion (Weeks 1–2)**
-  * Cross-cutting test seams first: `TimeProvider`, pluggable network transport, `MOCK_LLM` stub (§6.2).
-  * Docker Compose scaffolding (MySQL 8.0 with Volume Mounts and Range Partitions).
-  * Data Definition Language (DDL) execution and Seed Master Catalog (`master_products`).
-  * KAMIS and Garak Market API collectors with test suites.
-* **Phase 2: Scraper Harness, Human Simulation & AI Self-Healing (Weeks 3–4)**
-  * Playwright scraper framework with typing jitter, scrolling, and random delay models.
-  * Markdown distillation pipeline and Gemini Flash JSON schema integration.
-  * Regression test suite using static HTML failure fixtures.
-* **Phase 3: ERP Integration, Product Matching, Decision Engine & Action Logic (Weeks 5–6)**
-  * Internal CSV/Excel parsing endpoint and schema validation.
-  * `product_channel_map` matcher and manual review queue.
-  * Dynamic pricing strategy, margin calculations, Run-rate, and Spoilage alert engine; recommendation/approval workflow and audit log.
-  * Verification of all business logic equations via automated unit tests.
-* **Phase 4: Auth/RBAC, Matrix Dashboard, Personalization & System Verification (Weeks 7–9)**
-  * JWT auth, RBAC enforcement and field masking (§5.3); observability and backup jobs (§5.4).
-  * FastAPI query service and personalized Watchlist API endpoints.
-  * Responsive Three-Way Comparison Matrix Dashboard UI.
-  * End-to-end sandbox verification and containerized deployment dry run.
-* **Phase 5: Competitor Price & Margin Analysis per F-08 (status: §4.1)**
-  * P0 and P1 are implemented (see §4.1 for the exact status). Remaining: the spec §9 open items (VAT basis, finance reconciliation, disposal-cost source), then the P2 items.
+* **1단계: 기반, DB 엔진, 공개 데이터 수집 (1~2주차)**
+  * 횡단 테스트 이음새를 먼저: `TimeProvider`, 교체 가능한 네트워크 전송, `MOCK_LLM` 스텁(§6.2).
+  * Docker Compose 골격(볼륨 마운트와 범위 파티션이 있는 MySQL 8.0).
+  * 데이터 정의 언어(DDL) 실행과 마스터 카탈로그(`master_products`) 시드.
+  * 테스트 스위트가 있는 KAMIS와 가락시장 API 수집기.
+* **2단계: 스크래퍼 하네스, 사람 시뮬레이션, AI 자가 복구 (3~4주차)**
+  * 타이핑 지터, 스크롤, 무작위 지연 모델이 있는 Playwright 스크래퍼 프레임워크.
+  * 마크다운 증류 파이프라인과 Gemini Flash JSON 스키마 연동.
+  * 정적 HTML 실패 픽스처를 쓰는 회귀 테스트 스위트.
+* **3단계: ERP 연동, 상품 매칭, 의사결정 엔진, 행동 로직 (5~6주차)**
+  * 내부 CSV/Excel 파싱 엔드포인트와 스키마 검증.
+  * `product_channel_map` 매처와 수동 검토 큐.
+  * 동적 가격 전략, 마진 계산, 런레이트, 폐기 알림 엔진. 추천/승인 워크플로와 감사 로그.
+  * 자동 단위 테스트로 모든 비즈니스 로직 수식 검증.
+* **4단계: 인증/RBAC, 매트릭스 대시보드, 개인화, 시스템 검증 (7~9주차)**
+  * JWT 인증, RBAC 강제와 필드 가림(§5.3). 관측성과 백업 작업(§5.4).
+  * FastAPI 조회 서비스와 개인화된 관심 목록 API 엔드포인트.
+  * 반응형 3자 비교 매트릭스 대시보드 UI.
+  * 종단 간 샌드박스 검증과 컨테이너 배포 리허설.
+* **5단계: F-08에 따른 경쟁사 가격·마진 분석 (현황: §4.1)**
+  * P0, P1, P2를 구현했습니다(정확한 현황은 §4.1). 남은 것: 명세서 §9의 미결 항목(VAT 기준, 재무 대조, 폐기비 출처), 그리고 §4.1의 부분 구현과 미구현 항목.

@@ -1,134 +1,134 @@
-# MarketFlow Architecture
+# MarketFlow 아키텍처
 
-Requirements live in [SRS.md](SRS.md); day-to-day procedures in [PLAYBOOK.md](PLAYBOOK.md). This document describes how the system is put together and why.
+요구사항은 [SRS.md](SRS.md), 일상 운영 절차는 [PLAYBOOK.md](PLAYBOOK.md)에 있습니다. 이 문서는 시스템이 어떻게 구성되어 있고 왜 그렇게 했는지를 설명합니다.
 
-## 1. Shape of the system
+## 1. 시스템 구성
 
-Three deployable pieces share one database. There is no message broker and no cache: dedupe, job state, run queues and alert history all live in the database.
+배포 단위 세 개가 데이터베이스 하나를 공유합니다. 메시지 브로커도 캐시도 없습니다. 중복 제거, 작업 상태, 실행 대기열, 알림 이력은 모두 데이터베이스에 있습니다.
 
 ```
-                 ┌──────────────────────────── collector-worker (1 instance) ───────────────────────────┐
- KAMIS / Garak ─▶│ CrawlerService.loop (every 30 s)  ── dispatches per-crawler schedules + "Run now"     │
- RSS / Atom   ──▶│ Scheduler ── "decide" job (+30 min after collection) ──▶ decision engine              │
- retail sites ──▶│ Notifier ── Slack-compatible webhook (dedupe, backoff, dead letter)                   │
+                 ┌──────────────────────────── collector-worker (1개) ──────────────────────────────────┐
+ KAMIS / 가락시장 ▶│ CrawlerService.loop (30초마다) ── 크롤러별 일정과 "지금 실행" 요청을 처리               │
+ RSS / Atom   ──▶│ Scheduler ── "decide" 작업 (수집 30분 뒤) ──▶ 의사결정 엔진                            │
+ 소매 사이트   ──▶│ Notifier ── Slack 호환 웹훅 (중복 제거, 백오프, 폐기)                                  │
  data/inbox/* ──▶└──────────────┬───────────────────────────────────────────────────────────────────────┘
-                                │ writes
+                                │ 기록
                          ┌──────▼───────┐         ┌──────────────────────────────┐
-  ERP CSV/XLSX ─ cli ───▶│  MySQL 8 /   │◀────────│ backend-api (FastAPI + static │◀── browser (MD / BUYER / ADMIN)
-  MI CSV/XLSX  ─ cli ───▶│  SQLite(dev) │  reads  │ dashboard, same process)      │
+  ERP CSV/XLSX ─ cli ───▶│  MySQL 8 /   │◀────────│ backend-api (FastAPI + 정적   │◀── 브라우저 (MD / BUYER / ADMIN)
+  MI CSV/XLSX  ─ cli ───▶│  SQLite(개발)│  읽기   │ 대시보드, 같은 프로세스)       │
                          └──────────────┘         └──────────────┬───────────────┘
-                                                                 │ shares ./inbox volume with the worker
+                                                                 │ ./inbox 볼륨을 워커와 공유
 ```
 
-| Piece | Entry point | Responsibility |
+| 구성 요소 | 진입점 | 역할 |
 |---|---|---|
-| `db` | MySQL 8 (`db/init/001_schema.sql`) | System of record. SQLite is for local development only (no partitions, NUMERIC not exact). |
-| `collector-worker` | `python -m marketflow.worker` | Runs crawlers on their schedules, runs the decision job, sends alerts. Run **one** instance. |
-| `backend-api` | `python -m marketflow.web` | REST API and the single-page dashboard. Never fetches external sites. |
-| CLI | `python -m marketflow.cli` | Operator tasks: imports, decide/approve/apply, users, audits, one-off crawler runs. |
+| `db` | MySQL 8 (`db/init/001_schema.sql`) | 기록의 원천. SQLite는 로컬 개발 전용입니다(파티션 없음, NUMERIC이 정확한 소수가 아님). |
+| `collector-worker` | `python -m marketflow.worker` | 크롤러를 일정대로 실행하고, 의사결정 작업을 돌리고, 알림을 보냅니다. **하나만** 실행합니다. |
+| `backend-api` | `python -m marketflow.web` | REST API와 단일 페이지 대시보드. 외부 사이트를 직접 가져오지 않습니다. |
+| CLI | `python -m marketflow.cli` | 운영 작업: 가져오기, 결정/승인/적용, 사용자, 감사, 크롤러 단발 실행. |
 
-## 2. Code layout (`src/marketflow/`)
+## 2. 코드 구조 (`src/marketflow/`)
 
-| Package / module | Role |
+| 패키지 / 모듈 | 역할 |
 |---|---|
-| `settings.py`, `config/settings.toml` | Layered config: TOML file, overridden by environment variables. Secrets are redacted in `--check`. |
-| `db.py`, `repository.py`, `ops_repo.py` | SQLAlchemy 2 engine/DDL (MySQL and SQLite dialects) and repositories. `SQLITE_DDL` is generated from the same model as `db/init/001_schema.sql` by `scripts/gen_schema.py`. |
-| `collectors/` | `KamisCollector`, `GarakCollector`: public wholesale benchmarks into `ext_public_benchmarks`. |
-| `scrape/` | Retail scraping: transport, humanized pacing, HTML sanitizing, `selfheal` extractor (LLM-repaired selectors). |
-| `title_parser.py`, `units.py`, `curation.py` | Product title parsing, unit-price normalization, mapping channel items to `master_products`. |
-| `erp.py` | Inventory/cost import (CSV/XLSX, English/Korean headers, errors reported by line). |
-| `decision/` | `calc.py` (price math), `engine.py` (recommendation rules), `service.py` (run, approve, reject, apply, revert; audited), `config.py`. |
-| `mi/` | Market Intelligence: importer, store, `analysis.py` (Category Health, Trend Radar), bilingual `messages.py`. |
-| `crawlers/` | One-crawler-per-data-item framework: `base.py` (contract), `adapters.py`, `store.py`, `service.py`. |
-| `scheduler.py`, `schedule.py` | KST slot arithmetic (`latest_slot`) and the `decide` job. |
-| `notify.py` | Alert construction, dedupe, retry, dead letter. |
-| `web/` | `app.py` (routes), `repo.py` (read models), `security.py` (hashing, JWT, throttle), `static/` (dashboard: `index.html`, `app.js`, `i18n.js`, `style.css`). |
-| `matching.py`, `promotions.py`, `quality.py`, `snapshot.py`, `vision.py`, `flyers.py`, `insights.py` | Match grading (audited), promotion calendar, daily data-quality report and alerts, point-in-time snapshots (occurred vs. ingested time), flyer reading through the OpenAI API, flyer review (items wait for a person before analysis), P2 analyses (promotion results, long discounts, new products, sales-response scenarios). |
-| `mi/` (more) | `privacy.py` (personal-data filter on import), `classify.py` (category classifier), `gap.py` (search–sales gap diagnosis), synonym dictionary in `store.py`. |
-| `time_provider.py` | Injectable clock; all business logic takes a `TimeProvider`, so tests run on a fixed time. |
+| `settings.py`, `config/settings.toml` | 계층형 설정: TOML 파일을 환경변수가 덮어씁니다. `--check`에서는 비밀 값을 가립니다. |
+| `db.py`, `repository.py`, `ops_repo.py` | SQLAlchemy 2 엔진/DDL(MySQL, SQLite)과 리포지토리. `SQLITE_DDL`은 `scripts/gen_schema.py`가 `db/init/001_schema.sql`과 같은 모델에서 생성합니다. |
+| `collectors/` | `KamisCollector`, `GarakCollector`: 공개 도매 벤치마크를 `ext_public_benchmarks`에 넣습니다. |
+| `scrape/` | 소매 스크래핑: 전송, 사람처럼 보이는 간격, HTML 정제, `selfheal` 추출기(LLM이 복구한 셀렉터). |
+| `title_parser.py`, `units.py`, `curation.py` | 상품 제목 파싱, 단위 가격 정규화, 채널 상품을 `master_products`에 매핑. |
+| `erp.py` | 재고/원가 가져오기(CSV/XLSX, 영어/한국어 헤더, 오류는 줄 번호로 보고). |
+| `decision/` | `calc.py`(가격 계산), `engine.py`(추천 규칙), `service.py`(실행, 승인, 반려, 적용, 되돌리기, 감사 기록), `config.py`. |
+| `mi/` | 마켓 인텔리전스: 가져오기, 저장소, `analysis.py`(카테고리 헬스, 트렌드 레이더), 이중 언어 `messages.py`. |
+| `crawlers/` | 데이터 항목마다 크롤러 하나를 두는 프레임워크: `base.py`(규약), `adapters.py`, `store.py`, `service.py`. |
+| `scheduler.py`, `schedule.py` | KST 슬롯 계산(`latest_slot`)과 `decide` 작업. |
+| `notify.py` | 알림 생성, 중복 제거, 재시도, 폐기. |
+| `web/` | `app.py`(라우트), `repo.py`(조회 모델), `security.py`(해시, JWT, 제한), `static/`(대시보드: `index.html`, `app.js`, `i18n.js`, `style.css`). |
+| `matching.py`, `promotions.py`, `quality.py`, `snapshot.py`, `vision.py`, `flyers.py`, `insights.py` | 매칭 등급(감사 기록), 프로모션 캘린더, 일일 데이터 품질 보고와 알림, 특정 시점 스냅샷(발생 시각 대 적재 시각), OpenAI API로 전단 읽기, 전단 검토(항목은 사람이 확인하기 전에는 분석에 쓰이지 않음), P2 분석(프로모션 성과, 장기 할인, 신상품, 판매 반응 시나리오). |
+| `mi/` (추가) | `privacy.py`(가져오기 때 개인정보 필터), `classify.py`(카테고리 분류기), `gap.py`(검색-구매 간극 진단), `store.py`의 동의어 사전. |
+| `time_provider.py` | 주입 가능한 시계. 모든 비즈니스 로직이 `TimeProvider`를 받으므로 테스트는 고정된 시각에서 돌아갑니다. |
 
-## 3. Data model
+## 3. 데이터 모델
 
-Defined in `db/init/001_schema.sql`.
+`db/init/001_schema.sql`에 정의되어 있습니다.
 
-| Group | Tables | Notes |
+| 그룹 | 테이블 | 비고 |
 |---|---|---|
-| Catalog | `master_products`, `master_product_aliases`, `product_channel_map` | `std_item_id` is the join key across all sources. |
-| Market data | `ext_public_benchmarks`, `ext_retail_prices` | Time-partitioned on MySQL (`partitions.py` keeps future partitions created). |
-| Internal | `int_operations_inventory`, `inventory_revisions` | ERP import: stock, cost, price. Every load also appends a revision stamped with its ingestion time. Cost data never reaches BUYER responses. |
-| Decisions | `price_recommendations` | Status: PENDING → APPROVED → APPLIED, or SUPPRESSED / REJECTED / REVERTED. Person-made proposals (drafts) carry an evidence snapshot in `flags`. |
-| Operations | `review_queue`, `alert_log`, `selector_candidates`, `audit_log` | Review items and alerts are de-duplicated. |
-| Access | `users`, `user_category_assignments`, `user_watchlists`, `user_preferences` | |
-| Market intelligence | `mi_observations` | Long format: `signal_type`, `period_start`, `category_l`, `keyword`, `metric`, `value`, `source`; unique on that key. |
-| Keywords and calendar | `mi_synonyms`, `promotions` | Synonym dictionary with history; promotion calendar (informational). |
-| Flyers | `flyers`, `flyer_items` | Items read from images; only APPROVED items become PROMOTION observations. |
-| Crawlers | `crawler_settings`, `crawler_runs` | Settings (enabled, KST times, JSON config, `last_slot`); run history with status and `rows_loaded`. |
+| 카탈로그 | `master_products`, `master_product_aliases`, `product_channel_map` | `std_item_id`가 모든 출처를 잇는 키입니다. |
+| 시장 데이터 | `ext_public_benchmarks`, `ext_retail_prices` | MySQL에서는 시간 기준 파티션입니다(`partitions.py`가 미래 파티션을 계속 만들어 둡니다). |
+| 내부 | `int_operations_inventory`, `inventory_revisions` | ERP 가져오기: 재고, 원가, 가격. 적재할 때마다 적재 시각이 찍힌 이력이 추가됩니다. 원가 데이터는 BUYER 응답에 나가지 않습니다. |
+| 의사결정 | `price_recommendations` | 상태: PENDING → APPROVED → APPLIED, 또는 SUPPRESSED / REJECTED / REVERTED. 사람이 만든 제안(초안)은 `flags`에 근거 스냅샷을 담습니다. |
+| 운영 | `review_queue`, `alert_log`, `selector_candidates`, `audit_log` | 검토 항목과 알림은 중복을 제거합니다. |
+| 접근 | `users`, `user_category_assignments`, `user_watchlists`, `user_preferences` | |
+| 마켓 인텔리전스 | `mi_observations` | 롱 포맷: `signal_type`, `period_start`, `category_l`, `keyword`, `metric`, `value`, `source`. 이 키에 유일 제약이 있습니다. |
+| 키워드와 캘린더 | `mi_synonyms`, `promotions` | 이력이 있는 동의어 사전, 프로모션 캘린더(참고용). |
+| 전단 | `flyers`, `flyer_items` | 이미지에서 읽은 항목. APPROVED만 PROMOTION 관측값이 됩니다. |
+| 크롤러 | `crawler_settings`, `crawler_runs` | 설정(켜짐, KST 시각, JSON 설정, `last_slot`)과 상태, `rows_loaded`가 있는 실행 이력. |
 
-## 4. Main flows
+## 4. 주요 흐름
 
-### 4.1 Price recommendation
-1. Collectors and retail crawlers write benchmarks and competitor prices (matched to `std_item_id` by the title parser; unmatched titles go to `review_queue`).
-2. `import-erp` loads inventory and cost.
-3. Only competitor listings a person confirmed as SAME count (`product_channel_map.reviewed_at`); the simulator adds expected margin and break-even volume at the matched effective price. The `decide` job (also `cli decide`) evaluates each inventory row: floor from target margin and VAT, match or undercut the lowest competitor, cap the move per run (`max_step_pct`), apply a cooldown, hold price cuts while wholesale is rising, markdown for spoilage risk. The result is a `price_recommendations` row with a reason code and flags, or `SUPPRESSED` with the reason.
-4. An MD/ADMIN approves (solo mode: the proposer may approve their own; team mode: author ≠ approver, and below the margin defense line an ADMIN); `apply` updates the internal ledger. **Nothing is written back to a sales channel**: the engine is advisory. `export-prices` produces the change list.
-5. Each transition is an atomic status update (compare-and-set) and writes `audit_log`.
+### 4.1 가격 추천
+1. 수집기와 소매 크롤러가 벤치마크와 경쟁사 가격을 기록합니다(제목 파서가 `std_item_id`에 매칭하며, 매칭되지 않은 제목은 `review_queue`로 갑니다).
+2. `import-erp`가 재고와 원가를 적재합니다.
+3. 사람이 SAME으로 확정한 경쟁사 상품만 반영합니다(`product_channel_map.reviewed_at`). 시뮬레이터는 맞춘 실구매가에서의 예상 마진과 손익분기 수량을 더합니다. `decide` 작업(`cli decide`도 동일)은 재고 행마다 평가합니다: 목표 마진과 VAT로 바닥가를 계산하고, 최저 경쟁사에 맞추거나 더 싸게 하며, 한 번에 움직이는 폭을 제한하고(`max_step_pct`), 쿨다운을 적용하고, 도매가가 오르는 동안은 인하를 보류하고, 폐기 위험이 있으면 인하합니다. 결과는 사유 코드와 플래그가 붙은 `price_recommendations` 행이거나, 사유가 붙은 `SUPPRESSED`입니다.
+4. MD/ADMIN이 승인합니다(혼자 쓰기 모드: 제안자가 자기 제안을 승인할 수 있음. 팀 모드: 작성자 ≠ 승인자이며 마진 방어선 아래는 ADMIN). `apply`는 내부 장부만 갱신합니다. **판매 채널에는 아무것도 쓰지 않습니다.** 엔진은 보조 역할이며, `export-prices`가 변경 목록을 만듭니다.
+5. 모든 전이는 원자적 상태 갱신(compare-and-set)이며 `audit_log`에 기록됩니다.
 
-### 4.2 Crawlers
-- `crawlers/base.py` defines `Crawler` (id, label, schema of settings `Field`s, `run()` returning `RunOutcome`). `NotConfigured` marks a crawler that cannot run yet (SKIPPED, not FAILED).
-- Eight crawlers, one per data item: `report`, `buyer`, `news`, `competitor`, `flyer`, `newproduct`, `benchmark_kamis`, `benchmark_garak`.
-- Adapters: `InboxCrawler` (CSV/XLSX files in `data/inbox/<id>/`), `NewsCrawler` (RSS/Atom to weekly keyword mention counts), `BenchmarkCrawler`, `CompetitorCrawler`.
-- `CrawlerService.dispatch_once` runs every 30 s inside the worker: reap stale runs, start queued manual runs, start due scheduled runs. A slot is due when `latest_slot(now, times)` is newer than `last_slot` and within the 6 h catch-up window; older missed slots are skipped.
-- One run at a time per crawler: a pre-check plus a compare-and-set `UPDATE`. RUNNING longer than 2 h is reaped to FAILED. Failure raises a `CRAWLER_FAILED` alert.
-- The API creates `QUEUED` rows for "Run now" (`POST /crawlers/{id}/run`, 202) and the worker picks them up. The only inline execution in the API is the upload path of file-inbox crawlers.
+### 4.2 크롤러
+- `crawlers/base.py`가 `Crawler`(id, 라벨, 설정 `Field` 스키마, `RunOutcome`을 반환하는 `run()`)를 정의합니다. `NotConfigured`는 아직 실행할 수 없는 크롤러를 뜻합니다(실패가 아니라 SKIPPED).
+- 데이터 항목마다 하나씩, 크롤러는 여덟 개입니다: `report`, `buyer`, `news`, `competitor`, `flyer`, `newproduct`, `benchmark_kamis`, `benchmark_garak`.
+- 어댑터: `InboxCrawler`(`data/inbox/<id>/`의 CSV/XLSX), `FlyerCrawler`(이미지는 OpenAI로 읽어 검토 대기), `NewsCrawler`(RSS/Atom을 주간 키워드 언급 수로), `BenchmarkCrawler`, `CompetitorCrawler`.
+- `CrawlerService.dispatch_once`가 워커 안에서 30초마다 돕니다: 멈춘 실행 정리, 대기 중인 수동 실행 시작, 도래한 예약 실행 시작. `latest_slot(now, times)`가 `last_slot`보다 새롭고 6시간 만회 구간 안일 때 슬롯이 도래한 것으로 보며, 더 오래 놓친 슬롯은 건너뜁니다.
+- 크롤러당 한 번에 하나만 실행합니다(사전 확인 + compare-and-set `UPDATE`). RUNNING이 2시간을 넘으면 FAILED로 정리합니다. 실패하면 `CRAWLER_FAILED` 알림이 나갑니다.
+- API는 "지금 실행"(`POST /crawlers/{id}/run`, 202)에 `QUEUED` 행을 만들고 워커가 가져갑니다. API 안에서 직접 실행하는 것은 파일 인박스 크롤러의 업로드 경로뿐입니다.
 
-### 4.3 Market intelligence
-`import-mi` / `POST /mi/import` / inbox crawlers write `mi_observations`. `mi_report` then computes, per request and per user scope:
-- **Category health**: demand direction (GMV, else units sold), demand share shift in percentage points, stock cover (TIGHT < 3 days, SURPLUS > 14 days) from inventory, and a Search→demand lead test (period-over-period changes, lags 0–2, accepted only if r exceeds both `lead_min_r` and a one-sided p < 0.01 critical value).
-- **Trend radar**: lifecycle stage (SEED / EMERGING / GROWING / MAINSTREAM / FADING / STABLE) from growth, volume percentile among at least 3 peers, and corroboration by PRODUCT / PROMOTION / MEDIA signals; weighted score and opportunity score.
-- Narratives (what changed / why it matters / what to do) are rendered server-side in `en` or `ko` (`?lang=`); tests assert both catalogues have identical keys and placeholders.
+### 4.3 마켓 인텔리전스
+`import-mi` / `POST /mi/import` / 인박스 크롤러가 `mi_observations`를 채웁니다. `mi_report`는 요청마다, 사용자 범위별로 다음을 계산합니다.
+- **카테고리 헬스**: 수요 방향(GMV, 없으면 판매수량), 수요 점유율 이동(퍼센트포인트), 재고에서 얻은 재고 커버(TIGHT < 3일, SURPLUS > 14일), 검색→수요 선행 검정(기간 대비 변화율, 시차 0~2, r이 `lead_min_r`와 단측 p < 0.01 임계값을 모두 넘을 때만 인정).
+- **트렌드 레이더**: 증가율, 동료 3개 이상 사이의 검색량 백분위, PRODUCT / PROMOTION / MEDIA 신호의 뒷받침으로 생애주기 단계(SEED / EMERGING / GROWING / MAINSTREAM / FADING / STABLE)를 정하고, 가중 점수와 기회 점수를 계산합니다.
+- 서술(무엇이 바뀌었나 / 왜 중요한가 / 무엇을 할까)은 서버에서 `en` 또는 `ko`(`?lang=`)로 만들며, 두 문구 목록의 키와 자리표시자가 같은지 테스트합니다.
 
-## 5. Security model
+## 5. 보안 모델
 
-| Concern | Mechanism |
+| 항목 | 방법 |
 |---|---|
-| Authentication | Password hash + short-lived JWT (`token_ttl_minutes`); the API refuses to start without a ≥ 32-char `jwt_secret`. Roles are re-read from the DB on every request. |
-| Brute force | `LoginThrottle`: 5 failures / 15 min per email, in process memory (per process, not shared between replicas). |
-| Authorization | Roles ADMIN / MD / BUYER. MD and BUYER see only assigned `category_l`; out-of-scope resources return 404. BUYER responses omit cost and margin keys server-side. Crawlers: ADMIN edits, MD views, BUYER has no access. MI rows without a category are admin-only. |
-| Transport | TLS directly (`tls_cert`/`tls_key`) or at a reverse proxy with `hsts = true`; `trust_proxy` makes throttling use the real client IP. |
-| Browser | CSP `default-src 'self'`, no inline styles or scripts; charts are inline SVG. Token held in memory only. |
-| Outbound fetches | News feed URLs must be http(s) and not localhost, `.local`, `.internal`, or private/loopback/link-local IPs. XML parsed with `defusedxml`. Retail scraping requires a recorded `legal_review_ref`. |
-| File input | Inbox ignores symlinks, 20 MB cap; API upload 5 MB (MI import 5 MB); client-supplied filenames are never used on disk. |
-| LLM | Page text is sanitized before it is sent; returned selectors are validated against the page and held as `PENDING` until a person approves them. |
-| Alerts | Scraped text is escaped (no `@channel`). Alert text carries no price, margin or cost figures, only SKU, situation and a dashboard link. |
-| Vision (OpenAI) | Images leave the machine only while the flyer crawler is enabled and a key is set; type checked from bytes, 5 MB cap, output validated, personal data dropped, key and response bodies never logged. |
-| Approval | `[approval] solo_mode` (default true) lets a single operator approve their own proposals; `false` enforces author ≠ approver and admin approval below the defense line. Both are audited. |
-| Audit | Approve/reject/apply/revert, user and crawler changes, uploads and imports write `audit_log`. |
+| 인증 | 비밀번호 해시 + 짧은 수명의 JWT(`token_ttl_minutes`). 32자 이상의 `jwt_secret`이 없으면 API가 시작하지 않습니다. 역할은 요청마다 DB에서 다시 읽습니다. |
+| 무차별 대입 | `LoginThrottle`: 이메일당 15분에 5번 실패하면 제한. 프로세스 메모리에 있으므로 프로세스별이며 복제본끼리 공유하지 않습니다. |
+| 권한 | 역할 ADMIN / MD / BUYER. MD와 BUYER는 배정된 `category_l`만 봅니다. 범위 밖 리소스는 404를 돌려줍니다. BUYER 응답에서는 서버가 원가·마진 키를 뺍니다. 크롤러는 ADMIN이 수정, MD가 조회, BUYER는 접근 불가입니다. 카테고리가 없는 MI 행은 관리자만 봅니다. |
+| 전송 | 직접 TLS(`tls_cert`/`tls_key`) 또는 `hsts = true`인 리버스 프록시. `trust_proxy`를 켜면 제한이 실제 클라이언트 IP를 씁니다. |
+| 브라우저 | CSP `default-src 'self'; img-src 'self' blob:`, 인라인 스타일/스크립트 없음, 차트는 인라인 SVG, 토큰은 메모리에만 둡니다. |
+| 외부 요청 | 뉴스 피드 URL은 http(s)여야 하며 localhost, `.local`, `.internal`, 사설/루프백/링크로컬 IP는 안 됩니다. XML은 `defusedxml`로 파싱합니다. 소매 스크래핑은 기록된 `legal_review_ref`가 있어야 합니다. |
+| 파일 입력 | 인박스는 심볼릭 링크를 무시하고 20MB까지, API 업로드는 5MB(MI 가져오기 5MB)까지 받으며, 클라이언트가 준 파일명은 디스크에 쓰지 않습니다. |
+| LLM | 보내기 전에 페이지 텍스트를 정제하고, 돌려받은 셀렉터는 페이지와 대조해 검증한 뒤 사람이 승인할 때까지 `PENDING`으로 둡니다. |
+| 알림 | 수집한 텍스트는 이스케이프합니다(`@channel` 불가). 알림 본문에는 가격, 마진, 원가 수치가 없고 SKU, 상황, 대시보드 링크만 있습니다. |
+| 비전 (OpenAI) | 이미지는 전단 크롤러가 켜져 있고 키가 있을 때만 기기를 떠납니다. 형식은 파일 내용으로 확인하고, 5MB 상한, 출력 검증, 개인정보 제거, 키와 응답 본문은 로그에 남기지 않습니다. 이미지 제공 API는 인박스 안의 파일만 내보냅니다. |
+| 승인 | `[approval] solo_mode`(기본 true)는 혼자 쓰는 운영자가 자기 제안을 승인하게 하고, `false`는 작성자 ≠ 승인자와 방어선 아래 ADMIN 승인을 강제합니다. 둘 다 감사 기록이 남습니다. |
+| 감사 | 승인/반려/적용/되돌리기, 사용자와 크롤러 변경, 업로드, 가져오기, 전단 검토, 프로모션 변경이 `audit_log`에 기록됩니다. |
 
-## 6. Time and scheduling
+## 6. 시간과 스케줄
 
-- All schedules are KST (`TZ=Asia/Seoul` in containers); the database stores UTC (`--default-time-zone=+00:00`).
-- Defaults: benchmarks 06:00 / 09:00, retail 08:00 / 13:00 / 19:00, decisions 30 minutes after collection. Crawler times are editable on each crawler page and take effect without restarting the worker.
-- Business code never calls `datetime.now()` directly; it uses `TimeProvider` (`FixedTimeProvider` in tests).
+- 모든 일정은 KST입니다(컨테이너는 `TZ=Asia/Seoul`). 데이터베이스는 UTC로 저장합니다(`--default-time-zone=+00:00`).
+- 기본값: 벤치마크 06:00 / 09:00, 소매 08:00 / 13:00 / 19:00, 의사결정은 수집 30분 뒤. 크롤러 시각은 각 크롤러 페이지에서 수정하며 워커 재시작 없이 적용됩니다.
+- 비즈니스 코드는 `datetime.now()`를 직접 부르지 않고 `TimeProvider`를 씁니다(테스트에서는 `FixedTimeProvider`).
 
-## 7. Internationalization
+## 7. 다국어
 
-The dashboard is bilingual (English / Korean): static `data-i18n` attributes plus `t(key, params)`; status, flag and reason codes go through `codeText()` with a readable fallback for unknown codes. The choice is kept in `localStorage` (`mf-lang`) and defaults to the browser language. Server-generated narratives follow `?lang=`. Known gap: crawler run messages are stored in English.
+대시보드는 영어/한국어 이중 언어입니다. 정적 `data-i18n` 속성과 `t(key, params)`를 쓰고, 상태, 플래그, 사유 코드는 `codeText()`를 거치며 모르는 코드는 읽을 수 있는 대체 문구로 표시합니다. 선택은 `localStorage`(`mf-lang`)에 저장하고 기본값은 브라우저 언어입니다. 서버가 만드는 서술은 `?lang=`을 따릅니다. 알려진 한계: 크롤러 실행 메시지는 영어로 저장됩니다.
 
-## 8. Testing
+## 8. 테스트
 
-| Layer | Command | Notes |
+| 계층 | 명령 | 비고 |
 |---|---|---|
-| Offline suite | `.venv/bin/pytest` | SQLite and fixtures, no network or tokens. Includes the end-to-end autonomy test (`tests/test_autonomy.py`) that simulates days of unattended operation with a fake clock. |
-| Dashboard | `cd tests/js && npm test` (also run from pytest) | The real `app.js` + `index.html` in jsdom against a fake API. |
-| MySQL | `MARKETFLOW_TEST_DB_URL=... pytest -m mysql` | DDL, partitions, upserts, JSON/ENUM columns, history queries. |
-| Live | `MARKETFLOW_LIVE=1 pytest -m live` | Real KAMIS/Garak calls with your tokens. |
+| 오프라인 전체 | `.venv/bin/pytest` | SQLite와 픽스처, 네트워크와 토큰 불필요. 가짜 시계로 며칠간의 무인 운영을 시뮬레이션하는 종단 간 자율 운영 테스트(`tests/test_autonomy.py`)를 포함합니다. |
+| 대시보드 | `cd tests/js && npm test` (pytest에서도 실행) | 실제 `app.js` + `index.html`을 jsdom에서 가짜 API로 실행합니다. |
+| MySQL | `MARKETFLOW_TEST_DB_URL=... pytest -m mysql` | DDL, 파티션, upsert, JSON/ENUM 열, 이력 조회. |
+| 실서비스 | `MARKETFLOW_LIVE=1 pytest -m live` | 설정한 토큰으로 실제 KAMIS/가락시장을 호출합니다. |
 
-## 9. Known limits and extension points
+## 9. 알려진 한계와 확장 지점
 
-- The revised price/margin functional specification (SRS F-08): P0 and P1 are implemented; what is partial or missing is listed in [SRS.md](SRS.md) §4.1.
-- The worker is single-instance by design; the login throttle is per process.
-- Hive and Power BI have no direct connector (file inbox); the Kurly new-product collection happens outside MarketFlow and feed the inbox.
-- Not verified in CI: the Docker images, MySQL SQL for newer tables, live KAMIS/Garak/Gemini/OpenAI/Slack, real RSS feeds, and the dashboard in a real browser.
-- To add a data source: implement a `Crawler` in `crawlers/adapters.py`, register it in `CrawlerService.registry` (with its `ORDER` position), add translations for its labels in `web/static/i18n.js`, and add a test in `tests/test_crawlers.py`.
-- To add a pricing rule: extend `decision/engine.py`, give it a reason code, and add the code to `i18n.js`.
-- To add a channel write-back: implement it behind `apply` in `decision/service.py` with its own audit action; it does not exist today.
+- 개정된 가격·마진 기능 명세(SRS F-08): P0, P1, P2를 구현했습니다. 일부만 되었거나 없는 것은 [SRS.md](SRS.md) §4.1에 있습니다.
+- 워커는 설계상 하나만 실행합니다. 로그인 제한은 프로세스별입니다.
+- Hive와 Power BI에는 직접 커넥터가 없습니다(파일 인박스). 컬리 신상품 수집은 MarketFlow 밖에서 이뤄지며 결과를 인박스에 넣습니다. 전단 이미지는 OpenAI API로 읽습니다(README의 비전 참고).
+- CI에서 검증하지 못한 것: Docker 이미지, 새 테이블의 MySQL SQL, 실제 KAMIS/가락시장/Gemini/OpenAI/Slack, 실제 RSS 피드, 실제 브라우저의 대시보드.
+- 데이터 출처를 추가하려면: `crawlers/adapters.py`에 `Crawler`를 구현하고, `CrawlerService.registry`에 (`ORDER` 위치와 함께) 등록하고, `web/static/i18n.js`에 라벨 번역을 추가하고, `tests/test_crawlers.py`에 테스트를 추가합니다.
+- 가격 규칙을 추가하려면: `decision/engine.py`를 확장하고, 사유 코드를 주고, 그 코드를 `i18n.js`에 추가합니다.
+- 채널에 쓰기(write-back)를 추가하려면: `decision/service.py`의 `apply` 뒤에 고유한 감사 동작과 함께 구현합니다. 지금은 없습니다.
