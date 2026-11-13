@@ -36,7 +36,7 @@ function boot({ role = "MD", routes = {} } = {}) {
     "GET /quality": () => [200, { crawlers: [], unparseable_titles: 0, unmapped_items: 0, unconfirmed_matches: 0, matches_to_recheck: 0, issues: [] }],
     "GET /promotions": () => [200, { today: "2026-11-03", promotions: [] }],
     "GET /flyers": () => [200, { flyers: [] }],
-    "GET /discover": () => [200, { as_of: "2026-11-02", window_days: 14, top_searches: [], rising: [], new_products: [], summary: { new_products: 2, rising: 1, top_not_in_catalog: 1 } }],
+    "GET /discover": () => [200, { as_of: "2026-11-02", window_days: 14, top_searches: [], rising: [], new_products: [], gaps: [], summary: { new_products: 2, rising: 1, top_not_in_catalog: 1, gaps: 3 } }],
     "GET /insights": () => [200, { as_of: "2026-11-03", promotions: [], prolonged_discounts: [], new_products: [], response: {} }],
     ...routes,
   };
@@ -262,7 +262,7 @@ test("a flat or missing history degrades gracefully", async () => {
 test("summary strip and tab badges reflect the data", async () => {
   const t = boot(); await t.login();
   const figs = [...t.d.querySelectorAll("#summary .fig")].map((f) => text(f.querySelector("b")) + " " + text(f.querySelector("span")));
-  assert.deepEqual(figs, ["2 New competitor products", "1 Rising keywords", "1 Top searches missing from the catalog", "1 priced above the lowest competitor", "1 recommendations awaiting a decision"]);
+  assert.deepEqual(figs, ["2 New competitor products", "1 Rising keywords", "1 Top searches missing from the catalog", "3 Searched but not bought", "1 recommendations awaiting a decision"]);
   assert.equal(text(t.d.querySelector('nav button[data-tab="recs"] .badge')), "1");
   assert.equal(text(t.d.querySelector('nav button[data-tab="review"] .badge')), "1");
 });
@@ -696,7 +696,8 @@ test("settings: demo data only into an empty database; clearing needs DELETE typ
 
 // ---- discover is the first screen ------------------------------------------------------------------------------------------
 const KW = (over = {}) => ({ keyword: "그릭요거트", category: "Processed", searches: 1200, wow: 0.1, yoy: null, growth: 0.23, stage: "EMERGING", in_catalog: false, action: "Review the range", changed: "", series: [["2026-10-26", "900"], ["2026-11-02", "1200"]], ...over });
-const DISCOVER = { as_of: "2026-11-02", window_days: 14, summary: { new_products: 1, rising: 1, top_not_in_catalog: 1 },
+const DISCOVER = { as_of: "2026-11-02", window_days: 14, summary: { new_products: 1, rising: 1, top_not_in_catalog: 1, gaps: 1 },
+  gaps: [{ keyword: "라면", category: "Processed", searches: 1700, conversion: 0.02, primary_cause: "OUT_OF_STOCK", contributing_causes: ["PRICE_DISADVANTAGE"], action: "Restock" }],
   top_searches: [KW(), KW({ keyword: "사과", category: "Fresh", searches: 900, in_catalog: true, growth: 0.02, stage: "MAINSTREAM" })], rising: [KW()],
   new_products: [{ platform: "KURLY", channel_item_code: "N1", title: "그릭 요거트 프리미엄 1kg", std_item_id: 2, first_seen: "2026-10-29 01:00:00", item_name: "Yogurt", category: "Processed", price: 7900, we_sell_item: false }] };
 
@@ -712,6 +713,8 @@ test("discover opens first: new competitor products and the most searched keywor
   assert.match(text(top[0]), /그릭요거트/); assert.match(text(top[0]), /not in catalog/);
   assert.match(text(top[1]), /사과/); assert.match(text(top[1]), /✓/);
   assert.match(text(t.d.querySelector("#disc-rising tbody")), /그릭요거트/);
+  const gap = text(t.d.querySelector("#disc-gaps tbody"));
+  assert.match(gap, /라면/); assert.match(gap, /2\.0%/); assert.match(gap, /Out of stock/); assert.match(gap, /Price disadvantage/);
   assert.equal(text(t.d.querySelector('nav button[data-tab="discover"] .badge')), "1");
 });
 

@@ -69,12 +69,8 @@ function trendCell(value, series, cls, name, fmt, extra, tdClass = "num", points
 // ---- summary strip + tab badges ----------------------------------------------------------------------------------
 let lastRows = [], pendingCount = null;
 function renderSummary() {
-  const priced = lastRows.filter((r) => r.competitors.lowest_pack_price);
-  const above = priced.filter((r) => Number(r.internal.current_selling_price) > Number(r.competitors.lowest_pack_price)).length;
-  const stockouts = lastRows.reduce((n, r) => n + (r.competitors.out_of_stock || 0), 0);
   const ds = discoverSummary, figs = [];
-  if (ds) figs.push([ds.new_products, t("sum.new"), false], [ds.rising, t("sum.rising"), false], [ds.top_not_in_catalog, t("sum.missing"), ds.top_not_in_catalog > 0]);
-  figs.push([above, t("sum.above"), above > 0]);
+  if (ds) figs.push([ds.new_products, t("sum.new"), false], [ds.rising, t("sum.rising"), false], [ds.top_not_in_catalog, t("sum.missing"), ds.top_not_in_catalog > 0], [ds.gaps, t("sum.gaps"), ds.gaps > 0]);
   if (pendingCount !== null) figs.push([pendingCount, t("sum.pending"), pendingCount > 0]);
   $("#summary").replaceChildren(...figs.map(([n, label, alert]) => { const f = el("div", "", alert ? "fig alert" : "fig"); f.append(el("b", won(n)), el("span", label)); return f; }));
 }
@@ -386,6 +382,14 @@ function renderDiscover(d) {
   });
   fill("#disc-top", d.top_searches, 5, t("empty.radar"), (k) => keywordRow(k));
   fill("#disc-rising", d.rising, 5, t("empty.radar"), (k) => keywordRow(k));
+  fill("#disc-gaps", d.gaps, 5, t("empty.gap"), (g) => {
+    const tr = el("tr"), name = el("td"), cause = el("td");
+    name.append(el("span", g.keyword, "item"), el("small", g.category || t("no_category")));
+    cause.append(el("span", t("cause." + g.primary_cause), "pill " + (g.primary_cause === "OTHER" ? "" : "amber")));
+    for (const c of g.contributing_causes) cause.append(el("small", "+ " + t("cause." + c)));
+    tr.append(name, el("td", compact(g.searches), "num"), el("td", (g.conversion * 100).toFixed(1) + "%", "num"), cause, el("td", g.action || "–", "note"));
+    return tr;
+  });
 }
 async function loadDiscover() {
   const d = await api("/discover?lang=" + lang);

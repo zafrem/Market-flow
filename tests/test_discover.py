@@ -46,6 +46,15 @@ def test_rising_keywords_are_the_fast_growers(api):
     assert {"그릭요거트", "곤약면"} & {k["keyword"] for k in d["rising"][:2]}      # the demo's fastest risers
 
 
+def test_gap_keywords_name_the_likely_cause(api):
+    d = api("admin").json()
+    by = {g["keyword"]: g for g in d["gaps"]}
+    assert by["밀키트"]["primary_cause"] == "NO_PRODUCT"                         # searched a lot, nothing in the catalog
+    assert by["라면"]["primary_cause"] == "OUT_OF_STOCK"                        # sold out for the last days
+    assert by["만두"]["primary_cause"] == "PRICE_DISADVANTAGE"                  # a competitor sells it for much less
+    assert d["summary"]["gaps"] >= len(d["gaps"]) >= 3
+
+
 def test_new_competitor_products_carry_price_and_whether_we_sell_the_item(api):
     d = api("admin").json()
     p = next(x for x in d["new_products"] if x["channel_item_code"] == "KURLY-NEW-GREEK")

@@ -9,7 +9,9 @@ import csv
 import json
 import math
 import random
+import struct
 import tempfile
+import zlib
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -23,7 +25,10 @@ from .decision.config import load_decision_config
 from .decision.service import Actor, run_decisions
 from .mi.importer import import_signals
 from .mi.store import MiStore
-from .ops_repo import Repo
+from .crawlers.service import resolve_inbox
+from .flyers import add_flyer, get_flyer, review_flyer
+from .ops_repo import Repo, ReviewItem
+from .vision import FlyerItem
 from .promotions import add_promotion
 from .repository import SqlRepository
 from .settings import Settings
@@ -58,6 +63,7 @@ CHANNELS = {"OWN_MALL": (Decimal("3.5"), 1.0), "SHOPA": (Decimal("11.5"), 1.03)}
 PLATFORMS = {"COUPANG": 0.97, "KURLY": 1.12, "SSG": 1.05}
 HISTORY_DAYS, SNAPSHOT_DAYS = 60, 30
 ACTOR = Actor("demo", "ADMIN")
+DEMO_IMAGE_PREFIX = "demo-flyer-"
 
 
 def counts(engine: Engine) -> dict[str, int]:
@@ -70,9 +76,14 @@ def has_operational_data(engine: Engine) -> bool:
     return any(n[t] for t in OPERATIONAL_TABLES)
 
 
-def clear_data(engine: Engine) -> dict[str, int]:
-    """Delete every row of the operational tables and the catalog items the demo added. Returns rows removed per table."""
+def clear_data(engine: Engine, inbox: Path | str | None = None) -> dict[str, int]:
+    """Delete every row of the operational tables and the catalog items the demo added (and the placeholder flyer images the
+    demo wrote). Returns rows removed per table."""
     removed: dict[str, int] = {}
+    if inbox is not None:
+        for f in (resolve_inbox(str(inbox)) / "flyer" / "review").glob(DEMO_IMAGE_PREFIX + "*.png"):
+            if f.is_file() and not f.is_symlink():
+                f.unlink()
     with engine.begin() as c:
         for t in OPERATIONAL_TABLES:
             removed[t] = int(c.execute(text(f"SELECT COUNT(*) FROM {t}")).scalar())
@@ -122,8 +133,8 @@ def load_demo(engine: Engine, settings: Settings, tp: TimeProvider, today: date 
     for k in range(HISTORY_DAYS):
         day = today - timedelta(days=HISTORY_DAYS - 1 - k)
         for name, (l, m, ko, ws, *_x) in CATALOG.items():
-            if name in EXTRA_ITEMS:
-                continue                                         # public wholesale sources cover produce only
+            if name in EXTRA_ITEMS and name != "Egg":
+                continue                                         # public wholesale sources cover produce and eggs only
             for src, bias in (("KAMIS", 1.0), ("GARAK", 1.04)):
                 p = ws * trend[name][k] * bias * rng.uniform(0.985, 1.015)
                 rows.append({"recorded_date": day, "source_type": src, "std_item_id": ids[name], "raw_item_name": ko,
@@ -160,6 +171,8 @@ def load_demo(engine: Engine, settings: Settings, tp: TimeProvider, today: date 
                 sales = max(1, round(base_sales[name] * weekend * (1 + uplift(day, cat, ch)) * rng.uniform(0.88, 1.12) * (0.6 if ch == "SHOPA" else 1.0)))
                 cover = {"Onion": 45, "Milk": 4}.get(name, 9)
                 stock = int(sales * cover * rng.uniform(0.9, 1.1))
+                if name in ("Ramen", "Milk") and k >= HISTORY_DAYS - 3:
+                    stock = 0                                            # sold out for the last days: the search-to-purchase gap shows why
                 life = {"remaining_days": 3 if name == "Milk" else (6 if name == "Yogurt" else None),
                         "holding_age_days": 25 if name == "Onion" else None}
                 disp = disposal_cost(purchase, None, cfg.disposal_rate_pct)
@@ -184,6 +197,8 @@ def load_demo(engine: Engine, settings: Settings, tp: TimeProvider, today: date 
                     unit *= 0.66                                         # a price war on potatoes
                 if name == "Garlic" and plat == "COUPANG":
                     unit *= 0.88
+                if name == "Dumpling" and plat == "COUPANG":
+                    unit *= 0.85
                 sale = int(round(unit * 10 / 10) * 10)
                 discounted = rng.random() < (0.72 if (name, plat) == ("Garlic", "COUPANG") else 0.08)
                 original = int(round(sale / 0.85 / 10) * 10) if discounted else sale
@@ -226,21 +241,31 @@ def load_demo(engine: Engine, settings: Settings, tp: TimeProvider, today: date 
     # ---- demand signals through the real importer -------------------------------------------------------------------------
     n_mi = _load_signals(store, rng, today)
 
+    # ---- the other screens: flyers, review queue, selector candidates, crawler history, alerts ------------------------------
+    extras = _load_workflow_rows(engine, repo, store, settings, now, today, ids)
+
     # ---- decisions for today: some become PENDING, some SUPPRESSED -----------------------------------------------------
     made = run_decisions(repo, settings, tp, today)
     repo.audit(ACTOR.name, "DEMO_LOADED", None, {"inventory_rows": n_inv, "benchmarks": n_bench, "retail": n_retail}, now)
     return {"benchmarks": n_bench, "inventory_rows": n_inv, "competitor_prices": n_retail, "signals": n_mi,
-            "promotions": len(promos) + 1, "recommendations": len(made)}
+            "promotions": len(promos) + 1, "recommendations": len(made), **extras}
+
+
+# keyword, category, searches 20 weeks ago, weekly growth over the last 20 weeks, buyers per search
+KEYWORDS = [("사과", "Fresh", 900, 0.004, 0.09), ("배", "Fresh", 600, 0.003, 0.08), ("마늘", "Fresh", 400, 0.03, 0.06),
+            ("대파", "Fresh", 500, 0.02, 0.07), ("양파", "Fresh", 700, 0.0, 0.10), ("우유", "Fresh", 1500, 0.005, 0.025),
+            ("계란", "Fresh", 1200, -0.01, 0.11), ("샤인머스캣", "Fresh", 350, 0.06, 0.05),
+            ("요거트", "Processed", 800, 0.035, 0.11), ("그릭요거트", "Processed", 200, 0.09, 0.06), ("라면", "Processed", 1700, 0.002, 0.02),
+            ("만두", "Processed", 1100, 0.012, 0.025), ("고추장", "Processed", 350, -0.005, 0.09), ("밀키트", "Processed", 1400, 0.02, 0.015),
+            ("곤약면", "Processed", 120, 0.11, 0.07), ("냉동김밥", "Processed", 260, 0.07, 0.08), ("비건라면", "Processed", 40, 0.14, 0.05),
+            ("두부", "Processed", 500, -0.02, 0.10), ("컵밥", "Processed", 700, -0.03, 0.08)]
+NEWS = {"그릭요거트": 0.5, "곤약면": 0.4, "비건라면": 0.3, "샤인머스캣": 0.35, "밀키트": 0.25, "마늘": 0.2}      # media mentions per week, scaled by recency
+NEW_PRODUCTS = {"그릭요거트": 2, "곤약면": 3, "냉동김밥": 2, "밀키트": 1}
 
 
 def _load_signals(store: MiStore, rng: random.Random, today: date) -> int:
     monday = today - timedelta(days=today.weekday())
-    weeks = [monday - timedelta(weeks=w) for w in range(19, -1, -1)]
-    kws = [("사과", "Fresh", 900, 0.004), ("배", "Fresh", 600, 0.003), ("마늘", "Fresh", 400, 0.03), ("대파", "Fresh", 500, 0.02),
-           ("양파", "Fresh", 700, 0.0), ("우유", "Fresh", 1500, 0.005), ("계란", "Fresh", 1200, -0.01),
-           ("요거트", "Processed", 800, 0.035), ("그릭요거트", "Processed", 200, 0.09), ("라면", "Processed", 2000, 0.002),
-           ("만두", "Processed", 900, 0.012), ("고추장", "Processed", 350, -0.005), ("밀키트", "Processed", 300, 0.05),
-           ("곤약면", "Processed", 120, 0.11), ("냉동김밥", "Processed", 260, 0.07)]
+    weeks = [monday - timedelta(weeks=w) for w in range(59, -1, -1)]          # 60 weeks: enough for year-over-year
     total = 0
     with tempfile.TemporaryDirectory() as tmp:
         def write(name: str, header: list[str], rows: list[list[Any]]) -> Path:
@@ -248,19 +273,121 @@ def _load_signals(store: MiStore, rng: random.Random, today: date) -> int:
             with p.open("w", newline="", encoding="utf-8") as f:
                 w = csv.writer(f); w.writerow(header); w.writerows(rows)
             return p
-        search = [[str(w), kw, cat, int(base * math.exp(g * i) * rng.uniform(0.9, 1.1)), 0, 0, 0]
-                  for kw, cat, base, g in kws for i, w in enumerate(weeks)]
-        for r in search:
-            r[4] = int(r[3] * 0.08); r[5] = r[4] * 5200; r[6] = r[4] * 2
+        search = []
+        for kw, cat, base, g, conv in KEYWORDS:
+            for i, w in enumerate(weeks):
+                season = 1 + 0.08 * math.sin(2 * math.pi * i / 52)
+                searches = int(base * math.exp(g * max(0, i - 40)) * season * rng.uniform(0.92, 1.08))
+                buyers = int(searches * conv * rng.uniform(0.9, 1.1))
+                search.append([str(w), kw, cat, searches, buyers, buyers * 5200, buyers * 2])
         total += import_signals(write("s.csv", ["week", "keyword", "category", "searches", "buyers", "gmv", "unitsold"], search), store, "SEARCH", "demo").loaded
         months = [date(today.year, today.month, 1)]
-        for _ in range(7):
+        for _ in range(11):
             months.append((months[-1] - timedelta(days=1)).replace(day=1))
-        buyer = [[str(mth), cat, int(g * (1 + 0.03 * i) * rng.uniform(0.95, 1.05)), int(u * (1 + 0.03 * i))]
+        buyer = [[str(mth), cat, int(g * (1 + 0.025 * i) * rng.uniform(0.95, 1.05)), int(u * (1 + 0.025 * i))]
                  for cat, g, u in (("Fresh", 120_000_000, 15000), ("Processed", 90_000_000, 12000))
                  for i, mth in enumerate(reversed(months))]
         total += import_signals(write("b.csv", ["month", "category", "gmv", "unitsold"], buyer), store, "BUYER", "demo").loaded
-        promo = [[str(w), kw, cat, rng.randint(0, 3) + (3 if kw in ("마늘", "요거트", "라면") and i > 15 else 0)]
-                 for kw, cat, *_ in kws for i, w in enumerate(weeks)]
+        promo = [[str(w), kw, cat, rng.randint(0, 3) + (3 if kw in ("마늘", "요거트", "라면") and i > 55 else 0)]
+                 for kw, cat, *_ in KEYWORDS for i, w in enumerate(weeks)]
         total += import_signals(write("p.csv", ["week", "keyword", "category", "count"], promo), store, "PROMOTION", "demo").loaded
+        media = [[str(w), kw, cat, int(max(0, rate * max(0, i - 44) * rng.uniform(0.7, 1.3)))] for kw, rate in NEWS.items()
+                 for cat in [next(c for k, c, *_ in KEYWORDS if k == kw)] for i, w in enumerate(weeks)]
+        total += import_signals(write("m.csv", ["week", "keyword", "category", "count"], media), store, "MEDIA", "demo").loaded
+        prod = [[str(w), kw, next(c for k, c, *_ in KEYWORDS if k == kw), n if i > 54 else 0] for kw, n in NEW_PRODUCTS.items() for i, w in enumerate(weeks)]
+        total += import_signals(write("n.csv", ["week", "keyword", "category", "count"], prod), store, "PRODUCT", "demo").loaded
     return total
+
+
+def _png(width: int, height: int, paint) -> bytes:
+    """A small PNG made without any imaging library; paint(x, y) returns an (r, g, b) tuple."""
+    raw = bytearray()
+    for y in range(height):
+        raw.append(0)
+        for x in range(width):
+            raw.extend(paint(x, y))
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(bytes(raw), 6)) + chunk(b"IEND", b""))
+
+
+def _flyer_png(seed: int, header: tuple[int, int, int]) -> bytes:
+    """A placeholder flyer: coloured header, a grid of product cards with price tags (no readable text)."""
+    cols, rows, w, h, head = 3, 4, 360, 480, 70
+    cw, ch = w // cols, (h - head) // rows
+    rng = random.Random(seed)
+    cards = [[(rng.randint(150, 235), rng.randint(150, 235), rng.randint(120, 220)) for _ in range(cols)] for _ in range(rows)]
+    def paint(x: int, y: int):
+        if y < head:
+            return header
+        gx, gy = x // cw, (y - head) // ch
+        lx, ly = x % cw, (y - head) % ch
+        if gy >= rows or gx >= cols or lx < 6 or ly < 6 or lx > cw - 6 or ly > ch - 6:
+            return (245, 243, 238)
+        if ly > ch - 26 and lx < cw - 24:
+            return (200, 40, 40)                                   # price tag
+        return cards[gy][gx]
+    return _png(w, h, paint)
+
+
+FLYERS = [  # source, header colour, items (name, price, confidence), review
+    ("이마트 주간 전단", (0, 120, 80), [("사과 1.5kg", 9900, 0.96), ("배 3입", 8900, 0.93), ("대파 1단", 2980, 0.9), ("라면 5입", 3980, 0.95),
+                                       ("만두 800g", 7900, 0.88), ("계란 30구", 6990, 0.52), ("우유 1L", 2480, 0.64), ("마늘 500g", None, 0.4)], "pending"),
+    ("쿠팡 가을 기획전 배너", (20, 90, 160), [("샤인머스캣 2kg", 19900, 0.91), ("양파 3kg", 3990, 0.94), ("고추장 500g", 5900, 0.9),
+                                              ("그릭요거트 4입", 5480, 0.87)], "approved"),
+    ("컬리 신상품 배너", (110, 60, 140), [("곤약면 6입", 8900, 0.83), ("냉동김밥 10입", 9900, 0.8), ("비건라면 4입", 6900, 0.72),
+                                          ("밀키트 부대찌개", 12900, 0.58)], "pending"),
+]
+
+
+def _load_workflow_rows(engine, repo, store, settings, now: datetime, today: date, ids: dict[str, int]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    # flyers with placeholder images; one already reviewed so its items feed the weekly promotion mentions
+    review_dir = resolve_inbox(settings.inbox_dir) / "flyer" / "review"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    monday = today - timedelta(days=today.weekday())
+    for n, (source, colour, items, state) in enumerate(FLYERS, start=1):
+        name = f"{DEMO_IMAGE_PREFIX}{n}.png"
+        (review_dir / name).write_bytes(_flyer_png(n, colour))
+        fid = add_flyer(store, source, f"flyer/review/{name}", monday, [FlyerItem(a, b, c) for a, b, c in items], now)
+        if state == "approved":
+            review_flyer(store, ACTOR.name, now, fid, [{"item_id": i["item_id"], "action": "approve"} for i in get_flyer(store, fid)["items"]])
+    out["flyers"] = len(FLYERS)
+
+    review = [ReviewItem("UNMATCHED_TITLE", "COUPANG", "[산지직송] 샤인머스캣 2kg", "no catalog item matches this title", {"price": 19900}),
+              ReviewItem("UNMATCHED_TITLE", "COUPANG", "유기농 단호박 1.5kg", "no catalog item matches this title", {"price": 6900}),
+              ReviewItem("UNMATCHED_TITLE", "KURLY", "제주 감귤 3kg 로얄과", "no catalog item matches this title", {"price": 14900}),
+              ReviewItem("UNPARSEABLE_TITLE", "SSG", "프리미엄 과일 세트 (구성 상이)", "quantity or unit could not be read", {}),
+              ReviewItem("QUARANTINED_LISTING", "COUPANG", "COUPANG-APPLE-X", "price 100 differs from the last price by more than 50%", {"sale_price": 100, "last_price": 9400}),
+              ReviewItem("UNMAPPED_BENCHMARK", "KAMIS", "감귤", "no master_product_aliases entry", {}),
+              ReviewItem("UNCONVERTIBLE_BENCHMARK", "GARAK", "방울토마토(박스)", "unit cannot be converted to the standard unit", {"unit": "박스"})]
+    out["review_items"] = repo.add_review(review, now)
+
+    sel = {"item": "article.product-card", "fields": {"title": {"css": "h3.title"}, "sale_price": {"css": "span.price strong"}, "item_code": {"css": "", "attr": "data-sku"}}}
+    c1 = repo.add_candidate("COUPANG", sel, now - timedelta(days=2))
+    c2 = repo.add_candidate("KURLY", {**sel, "item": "li.goods"}, now - timedelta(days=1))
+    c3 = repo.add_candidate("SSG", {**sel, "item": "div.tmpl_item"}, now - timedelta(days=5))
+    repo.decide_candidate(c3, "REJECTED", "demo", now - timedelta(days=4))
+    out["selector_candidates"] = 3
+
+    runs = []
+    for cid, rows, every in (("report", 1, 1), ("buyer", 1, 1), ("flyer", 3, 7), ("newproduct", 2, 1), ("news", 6, 1), ("benchmark_kamis", 11, 1), ("benchmark_garak", 11, 1), ("competitor", 33, 1)):
+        for d in range(7):
+            if d % every:
+                continue
+            at = now - timedelta(days=d, hours=2)
+            failed = (cid == "news" and d == 1) or (cid == "report" and d == 3)
+            runs.append({"c": cid, "t": "MANUAL" if (cid == "flyer" and d == 0) else "SCHEDULED", "b": "admin@demo" if (cid == "flyer" and d == 0) else "",
+                         "s": "FAILED" if failed else "OK", "q": at - timedelta(minutes=1), "a": at, "f": at + timedelta(seconds=40), "r": 0 if failed else rows,
+                         "m": "feed returned HTTP 503" if cid == "news" else "file could not be read (encoding)" if failed else ""})
+    with engine.begin() as c:
+        for r in runs:
+            c.execute(text("INSERT INTO crawler_runs (crawler_id, trigger_kind, requested_by, status, queued_at, started_at, finished_at, rows_loaded, message) "
+                           "VALUES (:c,:t,:b,:s,:q,:a,:f,:r,:m)"), repo._b(r))
+        for i, (key, msg) in enumerate((("REVERSE_MARGIN:APPLE-1KG:SHOPA", "Reverse margin risk: APPLE-1KG on SHOPA"), ("COMPETITOR_OOS:PEAR", "Competitor out of stock: Pear on SSG"),
+                                        ("CRAWLER_FAILED:news", "Crawler failed: news"))):
+            c.execute(text("INSERT INTO alert_log (created_at, alert_key, status, attempts, last_error, message) VALUES (:t,:k,'SENT',1,NULL,:m)"),
+                      repo._b({"t": now - timedelta(hours=6 * (i + 1)), "k": key, "m": msg}))
+    out["crawler_runs"] = len(runs)
+    return out

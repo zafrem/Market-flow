@@ -13,7 +13,7 @@ from .mi.store import MiStore
 from .ops_repo import OpsRepository
 from .settings import Settings
 
-TOP_N, RISING_N = 10, 8
+TOP_N, RISING_N, GAP_N = 10, 8, 5
 RISING_STAGES = ("SEED", "EMERGING", "GROWING")
 
 
@@ -52,5 +52,8 @@ def discover(repo: OpsRepository, store: MiStore, settings: Settings, cfg: Insig
         fresh.append({**p, "item_name": it.get("item_name", ""), "category": it.get("category_l", ""),
                       "price": int(price[0]["sale_price"]) if price else None, "we_sell_item": p["std_item_id"] in ours})
     missing = [k for k in top if not k["in_catalog"]]
+    gaps = [{"keyword": g["keyword"], "category": g["category"], "searches": g["searches"], "conversion": g["conversion"],
+             "primary_cause": g["primary_cause"], "contributing_causes": g["contributing_causes"], "action": g["action"]} for g in report["gap"][:GAP_N]]
     return {"as_of": report["as_of"], "window_days": cfg.new_window_days, "top_searches": top, "rising": rising, "new_products": fresh,
-            "summary": {"new_products": len(fresh), "rising": len(rising), "top_not_in_catalog": len(missing)}}
+            "gaps": gaps,
+            "summary": {"new_products": len(fresh), "rising": len(rising), "top_not_in_catalog": len(missing), "gaps": len(report["gap"])}}

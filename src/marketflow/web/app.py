@@ -696,7 +696,7 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
         with demo_lock:
             if demo_job["state"] == "RUNNING":
                 raise HTTPException(409, "demo data is loading; wait until it finishes")
-            removed = demo.clear_data(engine)
+            removed = demo.clear_data(engine, settings.inbox_dir)
             demo_job.update(state="idle", message="", result=None)
         repo.audit(admin.email, "DATA_CLEARED", None, {k: v for k, v in removed.items() if v}, now())
         return {"removed": removed}
