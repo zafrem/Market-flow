@@ -23,7 +23,7 @@ $EDITOR config/settings.toml                # KAMIS 키/ID, 가락시장 URL/키
 .venv/bin/python -m marketflow.worker           # 또는 계속 실행하며 KST 일정(06:00, 09:00)에 맞춰 수집
 ```
 
-모든 설정은 환경변수로 덮어쓸 수 있습니다(`KAMIS_API_KEY`, `KAMIS_API_ID`, `GARAK_API_URL`, `GARAK_API_KEY`, `DATABASE_URL`, `MOCK_LLM`). MySQL을 쓰려면 `database.url`에 `mysql+pymysql://...` 주소를 넣습니다. SQLite는 로컬 개발용입니다(파티션 없음, NUMERIC이 정확한 소수가 아님).
+모든 설정은 환경변수로 덮어쓸 수 있습니다(`KAMIS_API_KEY`, `KAMIS_API_ID`, `GARAK_API_URL`, `GARAK_API_KEY`, `DATABASE_URL`, `MOCK_LLM`). MySQL을 쓰려면 `database.url`에 `mysql+pymysql://...` 주소를 넣습니다. 로컬 파일 DB(DuckDB 기본, SQLite도 가능)에는 파티션이 없고 날짜와 금액을 텍스트로 저장합니다(아래 "로컬 저장소와 사내 데이터 유입" 참고).
 
 수집 규칙(필드명, 정규식, 파서 진입점)은 `config/extraction.json`에 있고 바뀌면 자동으로 다시 읽습니다. 승인된 수정은 `config/overrides.json`에 저장됩니다.
 
@@ -31,6 +31,7 @@ $EDITOR config/settings.toml                # KAMIS 키/ID, 가락시장 URL/키
 
 ```bash
 .venv/bin/pytest                                   # 오프라인: 픽스처 + 로컬 파일 DB, 토큰 불필요
+MARKETFLOW_TEST_BACKEND=duckdb .venv/bin/pytest    # 같은 테스트를 DuckDB 파일 DB로 실행(기본은 SQLite)
 MARKETFLOW_LIVE=1 .venv/bin/pytest -m live -s      # 설정한 토큰으로 실제 KAMIS/가락시장 호출
 MARKETFLOW_TEST_DB_URL=mysql+pymysql://... .venv/bin/pytest -m mysql   # MySQL DDL/파티션 테스트
 ```
@@ -68,6 +69,8 @@ MARKETFLOW_TEST_DB_URL=mysql+pymysql://... .venv/bin/pytest -m mysql   # MySQL D
 
 ## API와 대시보드 (4단계)
 
+`scripts/start.sh`가 아래 과정(비밀키, 첫 계정, 서버 실행)을 한 번에 처리합니다. 손으로 하려면:
+
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(48))"      # 출력값을 settings.toml -> [auth] jwt_secret에 넣습니다
 .venv/bin/python -m marketflow.cli add-user kim@example.com "Kim" MD       # 비밀번호를 묻습니다 (10자 이상)
@@ -87,7 +90,7 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"      # 출력값을
 - **맞추면(If we match)**: 매트릭스와 모든 추천에 경쟁사 실구매가로 맞췄을 때의 예상 마진과 주간 손익분기 수량(`주간 수량 x 현재 마진 / 변경 후 마진`)이 표시됩니다. 인하 후 남는 마진이 없으면 "해당 가격에서 마진 없음"으로 표시합니다.
 - **내보내기**: 대시보드 > 비교 매트릭스 > 비교표 내보내기(CSV) 또는 `GET /matrix/export`(MD/ADMIN, `MATRIX_EXPORTED`로 감사 기록).
 - **알림에는 원가, 마진, 가격 수치가 없습니다.** SKU, 상황, 링크(`[server] public_url`)만 담깁니다. SKU와 유형당 24시간에 한 번만 보냅니다.
-- 기존 MySQL 업그레이드: `db/migrations/002`부터 `006`까지 순서대로 적용합니다(가격·마진 열, 키워드 테이블, 재고 이력, 프로모션, 전단 검토). SQLite는 없는 테이블과 열을 스스로 추가합니다.
+- 기존 MySQL 업그레이드: `db/migrations/002`부터 `006`까지 순서대로 적용합니다(가격·마진 열, 키워드 테이블, 재고 이력, 프로모션, 전단 검토). 로컬 파일 DB는 시작할 때 없는 테이블을 스스로 만듭니다(SQLite는 없는 열도 추가, DuckDB는 새 파일 기준).
 
 ## 비전 (ChatGPT / OpenAI API)
 경쟁사 전단과 배너는 OpenAI API로 읽습니다. 키는 `config/settings.toml`의 `[vision] openai_api_key`(파일 권한 600, git 제외)나 환경변수 `OPENAI_API_KEY`에 넣습니다(`OPENAI_MODEL`은 선택, 기본값 `gpt-4o-mini`, 계정에서 쓸 수 있는 비전 모델이면 됩니다). Docker에서는 `.env`에 `OPENAI_API_KEY`를 설정합니다. `python -m marketflow.worker --check`는 `vision_enabled=True/False`만 출력하고 키는 출력하지 않습니다.
@@ -114,7 +117,7 @@ python -m marketflow.cli mi-report                                    # 같은 �
 
 | 크롤러 | 채우는 것 | 데이터를 얻는 방법 |
 |---|---|---|
-| `report` | 검색 리포트(SEARCH) | 파일 인박스: Hive 내보내기를 CSV/XLSX로 넣거나 페이지에서 업로드 |
+| `report` | 검색 리포트(SEARCH) | 파일 인박스: Hive 내보내기나 Excel을 CSV/XLSX로 넣거나 페이지에서 업로드(재고·원가는 `import-internal`/`import-hive`) |
 | `buyer` | 내부 판매(BUYER) | 파일 인박스(Power BI 내보내기) |
 | `news` | 뉴스 언급(MEDIA) | 지정한 RSS/Atom 피드를 읽어 추적 키워드별 주간 기사 수를 셈 |
 | `competitor` | 경쟁사 가격 | 자가 복구 셀렉터를 쓰는 소매 스크래퍼(`config/extraction.json`) |
