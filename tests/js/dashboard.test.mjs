@@ -36,6 +36,7 @@ function boot({ role = "MD", routes = {} } = {}) {
     "GET /quality": () => [200, { crawlers: [], unparseable_titles: 0, unmapped_items: 0, unconfirmed_matches: 0, matches_to_recheck: 0, issues: [] }],
     "GET /promotions": () => [200, { today: "2026-11-03", promotions: [] }],
     "GET /flyers": () => [200, { flyers: [] }],
+    "GET /discover": () => [200, { as_of: "2026-11-02", window_days: 14, top_searches: [], rising: [], new_products: [], summary: { new_products: 2, rising: 1, top_not_in_catalog: 1 } }],
     "GET /insights": () => [200, { as_of: "2026-11-03", promotions: [], prolonged_discounts: [], new_products: [], response: {} }],
     ...routes,
   };
@@ -261,7 +262,7 @@ test("a flat or missing history degrades gracefully", async () => {
 test("summary strip and tab badges reflect the data", async () => {
   const t = boot(); await t.login();
   const figs = [...t.d.querySelectorAll("#summary .fig")].map((f) => text(f.querySelector("b")) + " " + text(f.querySelector("span")));
-  assert.deepEqual(figs, ["1 items tracked", "1 priced above the lowest competitor", "1 competitor listings out of stock", "1 recommendations awaiting a decision"]);
+  assert.deepEqual(figs, ["2 New competitor products", "1 Rising keywords", "1 Top searches missing from the catalog", "1 priced above the lowest competitor", "1 recommendations awaiting a decision"]);
   assert.equal(text(t.d.querySelector('nav button[data-tab="recs"] .badge')), "1");
   assert.equal(text(t.d.querySelector('nav button[data-tab="review"] .badge')), "1");
 });
@@ -356,12 +357,12 @@ test("language switch: static text, dynamic text, number format and the server r
   assert.match(health[3], /\(\+1\.8%p\)/); assert.match(health[4], /2\.5일 · 빠듯/); assert.match(health[5], /무엇이 바뀌었나: GMV rose 12%/);   // the story text itself comes from the server
   const radar = [...t.d.querySelectorAll("#radar-table tbody tr")][0];
   assert.equal(text(radar.children[1]), "◑ 부상"); assert.match(text(radar.children[3]), /프로모션 2 · 미디어 1/);
-  assert.match(text(t.d.querySelector("#summary")), /추적 품목/);
+  assert.match(text(t.d.querySelector("#summary")), /경쟁사 신상품/);
   assert.match(text(t.d.querySelector("#recs-table tbody tr td.status")), /대기/);                  // status codes are translated, unknown ones fall back
   assert.match(t.d.querySelector("#matrix-table .star").getAttribute("aria-label"), /관심 품목에 추가/);
   assert.match(t.d.querySelector("svg.spark").getAttribute("aria-label"), /최근 \d+일/);
   await t.click(t.d.querySelector("#lang"));                                                       // and back
-  assert.equal(text(t.d.querySelector('nav button[data-tab="health"]')), "Category health"); assert.match(text(t.d.querySelector("#summary")), /items tracked/);
+  assert.equal(text(t.d.querySelector('nav button[data-tab="health"]')), "Category health"); assert.match(text(t.d.querySelector("#summary")), /New competitor products/);
 });
 
 test("the chosen language is remembered and unknown codes fall back to readable text", async () => {
@@ -642,7 +643,7 @@ const USERS = { users: [{ user_id: 1, email: "k@x.com", name: "Kim", role: "ADMI
 
 test("the sign-in page says what the product is, in both languages", async () => {
   const t = boot();
-  assert.match(text(t.d.querySelector("#login .intro")), /MarketFlow gathers wholesale prices/);
+  assert.match(text(t.d.querySelector("#login .intro")), /for food retail, fresh and processed/);
   await t.click(t.d.querySelector("#lang"));
   assert.match(text(t.d.querySelector("#login .intro")), /판매 채널에 가격을 직접 쓰지 않습니다/);
   assert.ok(t.d.querySelector("#login-form"));
@@ -691,4 +692,31 @@ test("settings: demo data only into an empty database; clearing needs DELETE typ
   f.dispatchEvent(new t.w.Event("submit", { cancelable: true, bubbles: true })); await settle();
   assert.deepEqual(JSON.parse(t.calls.find((c) => c.path === "/admin/clear").body), { confirm: "DELETE" });
   assert.ok(f.hidden);
+});
+
+// ---- discover is the first screen ------------------------------------------------------------------------------------------
+const KW = (over = {}) => ({ keyword: "그릭요거트", category: "Processed", searches: 1200, wow: 0.1, yoy: null, growth: 0.23, stage: "EMERGING", in_catalog: false, action: "Review the range", changed: "", series: [["2026-10-26", "900"], ["2026-11-02", "1200"]], ...over });
+const DISCOVER = { as_of: "2026-11-02", window_days: 14, summary: { new_products: 1, rising: 1, top_not_in_catalog: 1 },
+  top_searches: [KW(), KW({ keyword: "사과", category: "Fresh", searches: 900, in_catalog: true, growth: 0.02, stage: "MAINSTREAM" })], rising: [KW()],
+  new_products: [{ platform: "KURLY", channel_item_code: "N1", title: "그릭 요거트 프리미엄 1kg", std_item_id: 2, first_seen: "2026-10-29 01:00:00", item_name: "Yogurt", category: "Processed", price: 7900, we_sell_item: false }] };
+
+test("discover opens first: new competitor products and the most searched keywords come before any price", async () => {
+  const t = boot({ routes: { "GET /discover": () => [200, DISCOVER] } }); await t.login();
+  assert.ok(!t.d.querySelector("#discover").hidden && t.d.querySelector("#matrix").hidden);
+  assert.equal(t.d.querySelector("nav button.active").dataset.tab, "discover");
+  assert.equal(t.d.querySelector("nav button").dataset.tab, "discover");                       // first in the menu, prices come later
+  const np = text(t.d.querySelector("#disc-new tbody"));
+  assert.match(np, /KURLY/); assert.match(np, /그릭 요거트 프리미엄 1kg/); assert.match(np, /7,900/); assert.match(np, /no/);   // we do not sell this item
+  const top = [...t.d.querySelectorAll("#disc-top tbody tr")];
+  assert.equal(top.length, 2);
+  assert.match(text(top[0]), /그릭요거트/); assert.match(text(top[0]), /not in catalog/);
+  assert.match(text(top[1]), /사과/); assert.match(text(top[1]), /✓/);
+  assert.match(text(t.d.querySelector("#disc-rising tbody")), /그릭요거트/);
+  assert.equal(text(t.d.querySelector('nav button[data-tab="discover"] .badge')), "1");
+});
+
+test("discover is empty-safe and also loads for BUYER (no cost data in it)", async () => {
+  const t = boot({ role: "BUYER" }); await t.login();
+  assert.ok(t.calls.some((c) => c.path.startsWith("/discover")));
+  assert.match(text(t.d.querySelector("#disc-new tbody")), /No new competitor products in the last 14 days/);
 });

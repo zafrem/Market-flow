@@ -17,6 +17,7 @@ from sqlalchemy.engine import Engine
 
 from .. import curation, matching
 from .. import demo, flyers
+from .. import discover as discover_mod
 from ..crawlers.service import resolve_inbox
 from ..vision import image_mime
 from ..insights import elasticity_basis, load_insight_config, new_products, project_scenarios, prolonged_discounts, promotion_results
@@ -450,6 +451,13 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
     def _item_scope(user: CurrentUser) -> dict[int, bool]:
         return {int(r["std_item_id"]): in_scope(user.scope, r["category_l"], r["category_m"])
                 for r in repo._rows("SELECT std_item_id, category_l, category_m FROM master_products")}
+
+    @app.get("/discover")
+    def discover_view(lang: Literal["en", "ko"] = "en", user: CurrentUser = Depends(current_user)):
+        """New competitor products and keywords by search volume and growth. No cost data, so every role may read it (own categories)."""
+        allowed = None if user.scope is None else {l for l, _ in user.scope}
+        return discover_mod.discover(repo, mi_store, settings, load_insight_config(settings.insights), allowed, _item_scope(user),
+                                     now().date(), lang, now())
 
     @app.get("/insights")
     def insights(user: CurrentUser = Depends(require_decider)):

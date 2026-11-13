@@ -72,8 +72,9 @@ function renderSummary() {
   const priced = lastRows.filter((r) => r.competitors.lowest_pack_price);
   const above = priced.filter((r) => Number(r.internal.current_selling_price) > Number(r.competitors.lowest_pack_price)).length;
   const stockouts = lastRows.reduce((n, r) => n + (r.competitors.out_of_stock || 0), 0);
-  const figs = [[lastRows.length, t("sum.items"), false], [above, t("sum.above"), above > 0],
-                [stockouts, t("sum.oos"), false]];
+  const ds = discoverSummary, figs = [];
+  if (ds) figs.push([ds.new_products, t("sum.new"), false], [ds.rising, t("sum.rising"), false], [ds.top_not_in_catalog, t("sum.missing"), ds.top_not_in_catalog > 0]);
+  figs.push([above, t("sum.above"), above > 0]);
   if (pendingCount !== null) figs.push([pendingCount, t("sum.pending"), pendingCount > 0]);
   $("#summary").replaceChildren(...figs.map(([n, label, alert]) => { const f = el("div", "", alert ? "fig alert" : "fig"); f.append(el("b", won(n)), el("span", label)); return f; }));
 }
@@ -87,14 +88,14 @@ function setBadge(tab, n) {
 
 function toast(msg) { $("#toast").textContent = msg || ""; }
 
-function signOut() { token = me = null; lastRows = []; miReport = null; crawlerId = null; pendingCount = null; tip().hidden = true; $("#app").hidden = true; $("#login").hidden = false; $("#who").textContent = ""; }
+function signOut() { token = me = null; discoverSummary = null; lastRows = []; miReport = null; crawlerId = null; pendingCount = null; tip().hidden = true; $("#app").hidden = true; $("#login").hidden = false; $("#who").textContent = ""; }
 function renderWho() {
   if (!me) return;
   const out = el("button", t("signout")); out.onclick = signOut;
   $("#who").replaceChildren(document.createTextNode(me.name + " · " + me.role + "  "), out);
 }
-const TABS = ["matrix", "health", "radar", "gap", "crawlers", "recs", "matches", "promos", "flyers", "insights", "review", "selectors", "settings"];
-const reloadAll = () => Promise.all([loadMatrix(), loadMi(), loadRecs(), ...(me.role === "BUYER" ? [] : [loadQuality(), loadPromos(), loadInsights(), loadFlyers(), loadMatches(), loadReview(), loadSelectors(), loadCrawlers(), loadSettings()])]);
+const TABS = ["discover", "matrix", "health", "radar", "gap", "crawlers", "recs", "matches", "promos", "flyers", "insights", "review", "selectors", "settings"];
+const reloadAll = () => Promise.all([loadDiscover(), loadMatrix(), loadMi(), loadRecs(), ...(me.role === "BUYER" ? [] : [loadQuality(), loadPromos(), loadInsights(), loadFlyers(), loadMatches(), loadReview(), loadSelectors(), loadCrawlers(), loadSettings()])]);
 function setLang(l) {
   lang = l;
   try { localStorage.setItem("mf-lang", l); } catch (e) { /* storage blocked: the choice lasts until reload */ }
@@ -363,6 +364,34 @@ $("#clear-form").addEventListener("submit", async (ev) => {
     ev.target.reset(); ev.target.hidden = true; toast(t("set.cleared")); await reloadAll();
   } catch (e) { toast(e.message); }
 });
+
+// ---- discover: new competitor products and the most searched / fastest rising keywords (the first screen) ----------------
+let discoverSummary = null;
+function keywordRow(k, withGrowth) {
+  const tr = el("tr"), name = el("td"), cat = k.in_catalog ? el("td", "✓ " + t("disc.in"), "green") : el("td"), searches = trendCell(compact(k.searches), k.series, "c-margin", k.keyword + " " + t("searches"), (v) => compact(v), t("vs_earlier", { pct: pctText(k.growth) }));
+  name.append(el("span", k.keyword, "item"), el("small", k.category || t("no_category")));
+  if (!k.in_catalog) cat.append(el("span", t("disc.missing"), "pill amber"));
+  const sub = [k.wow != null ? t("wow", { pct: pctText(k.wow) }) : "", k.yoy != null ? t("yoy", { pct: pctText(k.yoy) }) : ""].filter(Boolean).join(" · ");
+  if (sub) searches.append(el("small", sub, "pop"));
+  tr.append(name, el("td", t("stage." + k.stage), "stage"), searches, cat, el("td", k.action || "–", "note"));
+  return tr;
+}
+function renderDiscover(d) {
+  const fill = (id, rows, cols, empty, make) => { const body = $(id + " tbody"); body.replaceChildren(); if (!rows.length) emptyRow(body, cols, empty); rows.forEach((r) => body.append(make(r))); };
+  fill("#disc-new", d.new_products, 5, t("disc.empty_new", { days: d.window_days }), (p) => {
+    const tr = el("tr"), name = el("td"); name.append(el("span", p.title, "item"), el("small", [p.item_name, p.category].filter(Boolean).join(" · ")));
+    tr.append(el("td", p.platform), name, el("td", p.price === null ? "–" : won(p.price), "num"), el("td", p.first_seen.slice(0, 10), "num"),
+              p.we_sell_item ? el("td", "✓ " + t("disc.yes"), "green") : el("td", t("disc.no"), "amber"));
+    return tr;
+  });
+  fill("#disc-top", d.top_searches, 5, t("empty.radar"), (k) => keywordRow(k));
+  fill("#disc-rising", d.rising, 5, t("empty.radar"), (k) => keywordRow(k));
+}
+async function loadDiscover() {
+  const d = await api("/discover?lang=" + lang);
+  discoverSummary = d.summary; renderSummary(); renderDiscover(d);
+  setBadge("discover", d.summary.new_products);
+}
 
 async function loadPromos() {
   const { today, promotions } = await api("/promotions");

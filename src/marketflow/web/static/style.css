@@ -259,6 +259,11 @@ h2.sect { margin: 22px 0 8px; font-size: 15px; font-weight: 650; letter-spacing:
 #login .intro li b { color: var(--ink); margin-right: 4px; }
 @media (max-width: 760px) { #login:not([hidden]) { grid-template-columns: minmax(0, 1fr); gap: 24px; margin: 28px auto; } }
 
+nav button.group-start { margin-top: 14px; border-top: 1px solid var(--line); border-radius: 0; }
+#discover .hint { word-break: keep-all; }
+#discover h2 { font-size: 17px; margin: 22px 0 8px; } #discover h2:first-of-type { margin-top: 12px; }
+#discover td.note { color: var(--ink-2); font-size: 13px; max-width: 34ch; }
+
 /* ---- settings tab ---- */
 #settings h2 { font-size: 17px; margin: 22px 0 8px; } #settings h2:first-child { margin-top: 0; }
 #settings select, #settings #users-table input[type=text] { font: inherit; padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); }

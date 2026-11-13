@@ -1,4 +1,4 @@
-"""Demo data for trying the dashboard, and the clear-data tool that removes it (or any operational data) again.
+"""Demo data for trying the dashboard (food: fresh produce, eggs and milk, and processed foods), and the clear-data tool that removes it (or any operational data) again.
 
 Demo data is plausible, not real: a seeded random generator makes 60 days of wholesale prices, 30 days of competitor
 snapshots, inventory and cost history, promotions, demand signals, match decisions and pending recommendations.
@@ -46,11 +46,14 @@ CATALOG: dict[str, tuple[str, str, str, int, int, int, int]] = {
     "Radish": ("Fresh", "Vegetable", "무", 110, 1400, 2900, 280),
     "Green Onion": ("Fresh", "Vegetable", "대파", 320, 3900, 6500, 620),
     "Garlic": ("Fresh", "Vegetable", "마늘", 900, 11000, 17900, 1750),
-    "Milk": ("Dairy", "Milk", "우유", 230, 2600, 3900, 370),
-    "Yogurt": ("Dairy", "Yogurt", "요거트", 400, 4500, 6900, 650),
-    "Egg": ("Grocery", "Egg", "계란", 430, 4800, 7500, 700),
+    "Egg": ("Fresh", "Egg", "계란", 430, 4800, 7500, 700),
+    "Milk": ("Fresh", "Dairy", "우유", 230, 2600, 3900, 370),
+    "Yogurt": ("Processed", "Dairy", "요거트", 400, 4500, 6900, 650),
+    "Ramen": ("Processed", "Noodle", "라면", 360, 3600, 4980, 520),
+    "Dumpling": ("Processed", "Frozen", "만두", 520, 5200, 8900, 920),
+    "Gochujang": ("Processed", "Sauce", "고추장", 680, 6800, 11900, 1240),
 }
-EXTRA_ITEMS = ["Milk", "Yogurt", "Egg"]                      # added to the starter catalog; removed again by clear
+EXTRA_ITEMS = ["Egg", "Milk", "Yogurt", "Ramen", "Dumpling", "Gochujang"]    # added to the starter catalog (fresh produce); removed again by clear
 CHANNELS = {"OWN_MALL": (Decimal("3.5"), 1.0), "SHOPA": (Decimal("11.5"), 1.03)}   # fee %, price factor
 PLATFORMS = {"COUPANG": 0.97, "KURLY": 1.12, "SSG": 1.05}
 HISTORY_DAYS, SNAPSHOT_DAYS = 60, 30
@@ -134,7 +137,7 @@ def load_demo(engine: Engine, settings: Settings, tp: TimeProvider, today: date 
         ("가을 사과·배 특가", -34, -28, "Fresh", "", 20, 0.38),
         ("김장 채소 페스타", -22, -16, "Fresh", "", 10, 0.02),
         ("주말 신선 반값", -11, -8, "Fresh", "OWN_MALL", 30, 0.27),
-        ("우유·요거트 1+1", -15, -12, "Dairy", "", 15, 0.15),
+        ("라면·만두 행사", -15, -12, "Processed", "", 15, 0.15),
     ]
     def uplift(day: date, cat: str, ch: str) -> float:
         for _n, a, b, pc, pch, _d, up in promos:
@@ -142,7 +145,7 @@ def load_demo(engine: Engine, settings: Settings, tp: TimeProvider, today: date 
                 return up
         return 0.0
     base_sales = {"Apple": 38, "Pear": 24, "Onion": 62, "Potato": 55, "Napa Cabbage": 30, "Radish": 26,
-                  "Green Onion": 40, "Garlic": 18, "Milk": 90, "Yogurt": 48, "Egg": 70}
+                  "Green Onion": 40, "Garlic": 18, "Milk": 90, "Yogurt": 48, "Egg": 70, "Ramen": 120, "Dumpling": 44, "Gochujang": 16}
     for k in range(HISTORY_DAYS):
         day = today - timedelta(days=HISTORY_DAYS - 1 - k)
         batch, weekend = [], 1.25 if day.weekday() >= 5 else 1.0
@@ -150,7 +153,7 @@ def load_demo(engine: Engine, settings: Settings, tp: TimeProvider, today: date 
             cfg = load_decision_config(settings.decision, cat)
             for ch, (fee, pf) in CHANNELS.items():
                 purchase = Decimal(round(cost * trend.get(name, [1.0] * HISTORY_DAYS)[k] / 10) * 10)
-                fixed, logi = Decimal(300), Decimal(700 if cat == "Dairy" else 500)
+                fixed, logi = Decimal(300), Decimal(700 if name in ("Milk", "Yogurt", "Dumpling") else 500)
                 price = int(round(sell * pf / 100) * 100)
                 if name == "Apple" and k >= HISTORY_DAYS - 10:
                     price = int(round(price * 0.95 / 100) * 100)          # we cut the apple price 10 days ago
@@ -234,8 +237,10 @@ def _load_signals(store: MiStore, rng: random.Random, today: date) -> int:
     monday = today - timedelta(days=today.weekday())
     weeks = [monday - timedelta(weeks=w) for w in range(19, -1, -1)]
     kws = [("사과", "Fresh", 900, 0.004), ("배", "Fresh", 600, 0.003), ("마늘", "Fresh", 400, 0.03), ("대파", "Fresh", 500, 0.02),
-           ("양파", "Fresh", 700, 0.0), ("우유", "Dairy", 1500, 0.005), ("요거트", "Dairy", 800, 0.035), ("그릭요거트", "Dairy", 200, 0.09),
-           ("계란", "Grocery", 1200, -0.01), ("밀키트", "Grocery", 300, 0.05)]
+           ("양파", "Fresh", 700, 0.0), ("우유", "Fresh", 1500, 0.005), ("계란", "Fresh", 1200, -0.01),
+           ("요거트", "Processed", 800, 0.035), ("그릭요거트", "Processed", 200, 0.09), ("라면", "Processed", 2000, 0.002),
+           ("만두", "Processed", 900, 0.012), ("고추장", "Processed", 350, -0.005), ("밀키트", "Processed", 300, 0.05),
+           ("곤약면", "Processed", 120, 0.11), ("냉동김밥", "Processed", 260, 0.07)]
     total = 0
     with tempfile.TemporaryDirectory() as tmp:
         def write(name: str, header: list[str], rows: list[list[Any]]) -> Path:
@@ -252,10 +257,10 @@ def _load_signals(store: MiStore, rng: random.Random, today: date) -> int:
         for _ in range(7):
             months.append((months[-1] - timedelta(days=1)).replace(day=1))
         buyer = [[str(mth), cat, int(g * (1 + 0.03 * i) * rng.uniform(0.95, 1.05)), int(u * (1 + 0.03 * i))]
-                 for cat, g, u in (("Fresh", 120_000_000, 15000), ("Dairy", 60_000_000, 9000), ("Grocery", 40_000_000, 6000))
+                 for cat, g, u in (("Fresh", 120_000_000, 15000), ("Processed", 90_000_000, 12000))
                  for i, mth in enumerate(reversed(months))]
         total += import_signals(write("b.csv", ["month", "category", "gmv", "unitsold"], buyer), store, "BUYER", "demo").loaded
-        promo = [[str(w), kw, cat, rng.randint(0, 3) + (3 if kw in ("마늘", "요거트") and i > 15 else 0)]
+        promo = [[str(w), kw, cat, rng.randint(0, 3) + (3 if kw in ("마늘", "요거트", "라면") and i > 15 else 0)]
                  for kw, cat, *_ in kws for i, w in enumerate(weeks)]
         total += import_signals(write("p.csv", ["week", "keyword", "category", "count"], promo), store, "PROMOTION", "demo").loaded
     return total

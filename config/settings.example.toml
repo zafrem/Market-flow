@@ -62,7 +62,8 @@ product_cls = "02"     # "01" retail, "02" wholesale
 url     = ""           # env: GARAK_API_URL
 api_key = ""           # env: GARAK_API_KEY
 
-# Pricing decision parameters (all optional; defaults shown). Per-category overrides: [decision.Fresh]
+# Pricing decision parameters (all optional; defaults shown). Per-category overrides: [decision.Fresh] (fresh food spoils: raise
+# disposal_rate_pct, flash_discount_pct) and [decision.Processed] (shelf-stable: low write-off, steadier prices)
 [decision]
 # vat_rate = 0.10                  # KRW VAT
 # target_min_margin_pct = 0        # price floor = lowest price achieving this net margin (0 = break-even)

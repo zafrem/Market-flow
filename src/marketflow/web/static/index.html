@@ -17,12 +17,12 @@
   <main>
     <section id="login">
       <div class="intro">
-        <h2 data-i18n="login.headline">Wholesale, competitor and own prices on one screen</h2>
-        <p data-i18n="login.about">MarketFlow gathers wholesale prices, competitor prices, your own cost and stock, and search and demand signals, then proposes price changes that protect your margin. A person approves every change; nothing is written to a sales channel.</p>
+        <h2 data-i18n="login.headline">See what is new and what people search for, then price it</h2>
+        <p data-i18n="login.about">MarketFlow is for food retail, fresh and processed. It spots new competitor products and fast-rising searches first, then compares wholesale, competitor and your own prices and proposes changes that protect your margin. A person approves every change; nothing is written to a sales channel.</p>
         <ul>
-          <li><b data-i18n="login.f1.t">Comparison matrix</b> <span data-i18n="login.f1.d">wholesale, our price, the lowest competitor and the margin side by side</span></li>
-          <li><b data-i18n="login.f2.t">Recommendations</b> <span data-i18n="login.f2.d">proposals that never go below the margin floor, with the reason</span></li>
-          <li><b data-i18n="login.f3.t">Market intelligence</b> <span data-i18n="login.f3.d">category health, trend radar, promotion results</span></li>
+          <li><b data-i18n="login.f1.t">Discover</b> <span data-i18n="login.f1.d">new competitor products and the most searched, fastest rising keywords</span></li>
+          <li><b data-i18n="login.f2.t">Trends</b> <span data-i18n="login.f2.d">trend radar, search-to-purchase gaps, category health</span></li>
+          <li><b data-i18n="login.f3.t">Prices and margin</b> <span data-i18n="login.f3.d">comparison matrix and recommendations that never go below the margin floor</span></li>
         </ul>
       </div>
       <form id="login-form">
@@ -34,10 +34,19 @@
     </section>
     <section id="app" hidden>
       <div id="summary" class="summary" data-i18n-label="summary" aria-label="Summary"></div>
-      <nav><button data-tab="matrix" class="active"><span data-i18n="tab.matrix">Comparison matrix</span></button><button data-tab="health"><span data-i18n="tab.health">Category health</span></button><button data-tab="radar"><span data-i18n="tab.radar">Trend radar</span></button><button data-tab="gap"><span data-i18n="tab.gap">Search gap</span></button><button data-tab="recs"><span data-i18n="tab.recs">Recommendations</span></button><button data-tab="crawlers" class="decider"><span data-i18n="tab.crawlers">Crawlers</span></button><button data-tab="matches" class="decider"><span data-i18n="tab.matches">Product matches</span></button><button data-tab="flyers" class="decider"><span data-i18n="tab.flyers">Flyers</span></button><button data-tab="insights" class="decider"><span data-i18n="tab.insights">Insights</span></button><button data-tab="promos" class="decider"><span data-i18n="tab.promos">Promotions</span></button><button data-tab="review" class="decider"><span data-i18n="tab.review">Review queue</span></button><button data-tab="selectors" class="decider"><span data-i18n="tab.selectors">Selector candidates</span></button><button data-tab="settings" class="admin-only" hidden><span data-i18n="tab.settings">Settings</span></button></nav>
+      <nav><button data-tab="discover" class="active"><span data-i18n="tab.discover">Discover</span></button><button data-tab="radar"><span data-i18n="tab.radar">Trend radar</span></button><button data-tab="gap"><span data-i18n="tab.gap">Search gap</span></button><button data-tab="health"><span data-i18n="tab.health">Category health</span></button><button data-tab="matrix" class="group-start"><span data-i18n="tab.matrix">Comparison matrix</span></button><button data-tab="recs"><span data-i18n="tab.recs">Recommendations</span></button><button data-tab="crawlers" class="decider"><span data-i18n="tab.crawlers">Crawlers</span></button><button data-tab="matches" class="decider"><span data-i18n="tab.matches">Product matches</span></button><button data-tab="flyers" class="decider"><span data-i18n="tab.flyers">Flyers</span></button><button data-tab="insights" class="decider"><span data-i18n="tab.insights">Insights</span></button><button data-tab="promos" class="decider"><span data-i18n="tab.promos">Promotions</span></button><button data-tab="review" class="decider"><span data-i18n="tab.review">Review queue</span></button><button data-tab="selectors" class="decider"><span data-i18n="tab.selectors">Selector candidates</span></button><button data-tab="settings" class="admin-only" hidden><span data-i18n="tab.settings">Settings</span></button></nav>
       <p id="toast" role="status"></p>
       <ul id="qstrip" class="qstrip decider" hidden></ul>
-      <div id="matrix">
+      <div id="discover">
+        <p class="hint" data-i18n="disc.hint">What is new and what people search for, before prices. Search is interest, not demand.</p>
+        <h2 data-i18n="disc.new">New competitor products</h2>
+        <div class="scroll"><table id="disc-new"><thead><tr><th data-i18n="th.platform">Platform</th><th data-i18n="disc.product">Product</th><th class="r" data-i18n="disc.price">Pack price</th><th data-i18n="disc.first_seen">First seen</th><th data-i18n="disc.we_sell">We sell this item</th></tr></thead><tbody></tbody></table></div>
+        <h2 data-i18n="disc.top">Most searched keywords</h2>
+        <div class="scroll"><table id="disc-top"><thead><tr><th data-i18n="th.keyword">Keyword</th><th data-i18n="th.stage">Stage</th><th class="r" data-i18n="th.searches">Searches</th><th data-i18n="disc.catalog">In catalog</th><th data-i18n="disc.next">Next step</th></tr></thead><tbody></tbody></table></div>
+        <h2 data-i18n="disc.rising">Fastest rising</h2>
+        <div class="scroll"><table id="disc-rising"><thead><tr><th data-i18n="th.keyword">Keyword</th><th data-i18n="th.stage">Stage</th><th class="r" data-i18n="th.searches">Searches</th><th data-i18n="disc.catalog">In catalog</th><th data-i18n="disc.next">Next step</th></tr></thead><tbody></tbody></table></div>
+      </div>
+      <div id="matrix" hidden>
         <div class="toolbar">
           <label class="inline"><input type="checkbox" id="only-watch"> <span data-i18n="watch_only">Watchlist only</span></label>
           <p class="hint" data-i18n="matrix.hint">Charts show the last 14 days. Hover a chart for daily values.</p>
