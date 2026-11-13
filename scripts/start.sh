@@ -18,9 +18,12 @@ done
 
 # 1) virtualenv and dependencies
 if [ ! -x "$PY" ]; then
-  echo "[start] creating .venv and installing dependencies (first run only)..."
+  echo "[start] creating .venv..."
   python3 -m venv .venv
-  .venv/bin/pip install -q -e '.[dev]'
+fi
+if ! "$PY" -c "import marketflow, duckdb_engine, fastapi" 2>/dev/null; then
+  echo "[start] installing dependencies into .venv (first run, or after an update)..."
+  "$PY" -m pip install -q -e '.[dev]'
 fi
 
 # 2) settings file (git-ignored, holds your keys)
