@@ -47,6 +47,7 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
     p = sub.add_parser("synonym"); p.add_argument("alias"); p.add_argument("canonical", nargs="?"); p.add_argument("--remove", action="store_true")
     p = sub.add_parser("snapshot"); p.add_argument("date"); p.add_argument("--known-at", help="UTC ISO time: what the system knew then")
     sub.add_parser("quality")
+    sub.add_parser("insights")
     sub.add_parser("synonyms"); sub.add_parser("classify-eval")
     p = sub.add_parser("mi-report"); p.add_argument("--stable", action="store_true"); p.add_argument("--lang", choices=["en", "ko"], default="en")
     sub.add_parser("crawlers")
@@ -200,6 +201,17 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
         print(f"unparseable={rep['unparseable_titles']} unmapped={rep['unmapped_items']} unconfirmed={rep['unconfirmed_matches']} to_recheck={rep['matches_to_recheck']}", file=out)
         for i in rep["issues"]:
             print(f"ISSUE {i['code']} {i['subject']}", file=out)
+        return 0
+    if a.cmd == "insights":
+        from .insights import load_insight_config, new_products, prolonged_discounts, promotion_results
+        cfg, day = load_insight_config(settings.insights), tp.now().date()
+        for r in promotion_results(repo, day, cfg):
+            up = "n/a" if r["uplift_pct"] is None else f"{r['uplift_pct']:+.1f}%"
+            print(f"promotion {r['name']} {r['start_date']}..{r['end_date']} {r['status']} uplift={up} actual={r['actual_units']} baseline={r['baseline_units']}", file=out)
+        for r in prolonged_discounts(repo, day, cfg):
+            print(f"prolonged discount {r['platform']}/{r['channel_item_code']} {r['title']}: {r['days_discounted']}/{r['days_observed']} days ({r['share_pct']}%)", file=out)
+        for r in new_products(repo, day, cfg):
+            print(f"new product {r['platform']}/{r['channel_item_code']} {r['title']} (first seen {r['first_seen']})", file=out)
         return 0
     if a.cmd == "snapshot":
         from .snapshot import snapshot

@@ -35,6 +35,8 @@ function boot({ role = "MD", routes = {} } = {}) {
     "GET /matches": () => [200, { matches: [] }],
     "GET /quality": () => [200, { crawlers: [], unparseable_titles: 0, unmapped_items: 0, unconfirmed_matches: 0, matches_to_recheck: 0, issues: [] }],
     "GET /promotions": () => [200, { today: "2026-11-03", promotions: [] }],
+    "GET /flyers": () => [200, { flyers: [] }],
+    "GET /insights": () => [200, { as_of: "2026-11-03", promotions: [], prolonged_discounts: [], new_products: [], response: {} }],
     ...routes,
   };
   const dom = new JSDOM(html, { runScripts: "outside-only", url: "http://localhost/" });
@@ -572,4 +574,61 @@ test("promotion calendar: list with state and lane, add, remove", async () => {
   assert.ok(t.calls.some((c) => c.method === "DELETE" && c.path === "/promotions/7"));
   await t.click(t.d.querySelector("#lang"));
   assert.match(text(t.d.querySelector("#promos-table tbody")), /진행 중/);
+});
+
+
+test("insights: promotion verdicts, sales response basis, long discounts and new products", async () => {
+  const d = { as_of: "2026-11-03",
+    promotions: [{ promo_id: 1, name: "Chuseok", category_l: "Fresh", start_date: "2026-10-20", end_date: "2026-10-24", status: "OK", uplift_pct: 100, actual_units: 100, baseline_units: 50 },
+                 { promo_id: 2, name: "Dud", category_l: "Fresh", start_date: "2026-10-27", end_date: "2026-10-31", status: "FAILED", uplift_pct: -2.5, actual_units: 49, baseline_units: 50 },
+                 { promo_id: 3, name: "Fresh start", category_l: "", start_date: "2026-11-02", end_date: "2026-11-09", status: "INSUFFICIENT_DATA", uplift_pct: null, actual_units: 0, baseline_units: 0 }],
+    response: { Fresh: { status: "OK", promotions_used: 3, span: ["2026-09-01", "2026-10-05"], elasticity: { pessimistic: 1.5, base: 2, optimistic: 3 } }, Dairy: { status: "INSUFFICIENT_DATA", promotions_used: 1, needed: 3 } },
+    prolonged_discounts: [{ platform: "SHOPA", channel_item_code: "L", title: "사과 3kg", days_observed: 30, days_discounted: 24, share_pct: 80 }],
+    new_products: [{ platform: "SHOPA", channel_item_code: "N", title: "딸기 500g", first_seen: "2026-10-31 08:00:00" }] };
+  const t = boot({ routes: { "GET /insights": () => [200, d] } }); await t.login();
+  const rows = [...t.d.querySelectorAll("#ins-promos tbody tr")];
+  assert.equal(rows.length, 3);
+  assert.match(text(rows[0]), /Worked/); assert.match(text(rows[0]), /\+100%/);
+  assert.match(text(rows[1]), /Failed/); assert.ok(rows[1].querySelector(".status.red"));
+  assert.match(text(rows[2]), /Not enough data/);                                  // no number invented
+  const resp = [...t.d.querySelectorAll("#ins-response tbody tr")];
+  const fresh = resp.find((r) => /Fresh/.test(text(r))), dairy = resp.find((r) => /Dairy/.test(text(r)));
+  assert.match(text(fresh), /1\.5/);
+  assert.match(text(dairy), /1 of 3 promotions needed/);                             // Dairy: not enough promotions, no numbers
+  assert.match(text(t.d.querySelector("#ins-prolonged tbody")), /24 \/ 30/);
+  assert.match(text(t.d.querySelector("#ins-new tbody")), /2026-10-31/);
+  await t.click(t.d.querySelector("#lang"));
+  assert.match(text(t.d.querySelector('nav button[data-tab="insights"]')), /인사이트/);
+  assert.match(text(t.d.querySelector("#ins-promos tbody")), /효과 없음/);
+});
+
+test("BUYER never loads insights", async () => {
+  const t = boot({ role: "BUYER" }); await t.login();
+  assert.ok(!t.calls.some((c) => c.path === "/insights"));
+});
+
+
+test("flyers: list, item review with confidence flags, approve with a fixed name, reject", async () => {
+  const flyer = { flyer_id: 4, source_name: "week44.png", week_start: "2026-11-02", status: "PENDING",
+    items: [{ item_id: 10, name: "사과", price: 1000, confidence: 0.95, low_confidence: false, category_l: "Fresh", status: "PENDING" },
+            { item_id: 11, name: "딸기 5OOg", price: null, confidence: 0.4, low_confidence: true, category_l: "", status: "PENDING" }] };
+  const t = boot({ routes: { "GET /flyers": () => [200, { flyers: [{ flyer_id: 4, source_name: "week44.png", week_start: "2026-11-02", status: "PENDING", items: 2, pending: 2 }] }],
+                             "GET /flyers/4": () => [200, flyer], "POST /flyers/4/review": () => [200, flyer] } });
+  await t.login();
+  assert.match(text(t.d.querySelector('nav button[data-tab="flyers"] .badge')), /1/);
+  await t.click(t.d.querySelector("#flyer-list button"));
+  const rows = [...t.d.querySelectorAll("#flyer-page tbody tr")];
+  assert.equal(rows.length, 2);
+  assert.match(text(rows[1]), /Check this one/); assert.ok(!/Check this one/.test(text(rows[0])));            // only the unsure one is flagged
+  rows[1].querySelector("input").value = "딸기 500g";
+  await t.click([...rows[1].querySelectorAll("button")].find((b) => text(b) === "Approve"));
+  const post = t.calls.find((c) => c.method === "POST" && c.path === "/flyers/4/review");
+  assert.deepEqual(JSON.parse(post.body), { decisions: [{ item_id: 11, action: "approve", name: "딸기 500g" }] });
+  await t.click([...rows[0].querySelectorAll("button")].find((b) => text(b) === "Reject"));
+  assert.deepEqual(JSON.parse(t.calls.filter((c) => c.path === "/flyers/4/review")[1].body), { decisions: [{ item_id: 10, action: "reject" }] });
+});
+
+test("BUYER never loads flyers", async () => {
+  const t = boot({ role: "BUYER" }); await t.login();
+  assert.ok(!t.calls.some((c) => c.path.startsWith("/flyers")));
 });

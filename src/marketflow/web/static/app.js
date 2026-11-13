@@ -93,8 +93,8 @@ function renderWho() {
   const out = el("button", t("signout")); out.onclick = signOut;
   $("#who").replaceChildren(document.createTextNode(me.name + " · " + me.role + "  "), out);
 }
-const TABS = ["matrix", "health", "radar", "gap", "crawlers", "recs", "matches", "promos", "review", "selectors"];
-const reloadAll = () => Promise.all([loadMatrix(), loadMi(), loadRecs(), ...(me.role === "BUYER" ? [] : [loadQuality(), loadPromos(), loadMatches(), loadReview(), loadSelectors(), loadCrawlers()])]);
+const TABS = ["matrix", "health", "radar", "gap", "crawlers", "recs", "matches", "promos", "flyers", "insights", "review", "selectors"];
+const reloadAll = () => Promise.all([loadMatrix(), loadMi(), loadRecs(), ...(me.role === "BUYER" ? [] : [loadQuality(), loadPromos(), loadInsights(), loadFlyers(), loadMatches(), loadReview(), loadSelectors(), loadCrawlers()])]);
 function setLang(l) {
   lang = l;
   try { localStorage.setItem("mf-lang", l); } catch (e) { /* storage blocked: the choice lasts until reload */ }
@@ -220,6 +220,79 @@ async function loadQuality() {
     if (n) { const li = el("li", "", "low"); li.append(el("span", t(key, { n }))); chips.push(li); }
   }
   strip.replaceChildren(...chips); strip.hidden = !chips.length;
+}
+
+// ---- flyers: the image beside what the reader found; only approved items reach the analysis -----------------------------
+let flyerId = null, flyerUrl = null;
+async function loadFlyers() {
+  const { flyers } = await api("/flyers");
+  setBadge("flyers", flyers.reduce((n, f) => n + (f.pending ? 1 : 0), 0));
+  const ul = $("#flyer-list");
+  if (!flyers.length) { const li = el("li"); li.append(el("p", t("fl.none"), "empty")); ul.replaceChildren(li); return; }
+  ul.replaceChildren(...flyers.map((f) => {
+    const li = el("li"), b = el("button", "", f.flyer_id === flyerId ? "active" : "");
+    b.append(el("b", f.source_name), el("small", f.week_start + " · " + (f.pending ? t("fl.pending", { n: f.pending }) : t("fl.done"))));
+    b.onclick = () => openFlyer(f.flyer_id); li.append(b); return li;
+  }));
+  if (flyerId && flyers.some((f) => f.flyer_id === flyerId)) await openFlyer(flyerId, true);
+}
+async function openFlyer(id, keepImage) {
+  flyerId = id;
+  const f = await api("/flyers/" + id), page = $("#flyer-page");
+  const img = el("img", "", "flyer-img"); img.alt = f.source_name;
+  const side = el("div", "", "flyer-side"); side.append(img);
+  if (keepImage && flyerUrl && page.dataset.flyer === String(id)) img.src = flyerUrl;
+  else {
+    if (flyerUrl) URL.revokeObjectURL(flyerUrl);
+    flyerUrl = null; page.dataset.flyer = String(id);
+    fetch("/flyers/" + id + "/image", { headers: { Authorization: "Bearer " + token } })
+      .then((r) => { if (!r.ok) throw new Error(); return r.blob(); })
+      .then((blob) => { flyerUrl = URL.createObjectURL(blob); img.src = flyerUrl; })
+      .catch(() => side.append(el("p", t("fl.image_failed"), "hint")));
+  }
+  const table = el("table"), head = el("tr");
+  for (const k of ["fl.name", "fl.price", "fl.conf", "th.status", ""]) head.append(el("th", k ? t(k) : ""));
+  const thead = el("thead"); thead.append(head); table.append(thead);
+  const body = el("tbody"); table.append(body);
+  const decide = async (decisions) => { try { await api("/flyers/" + id + "/review", { method: "POST", body: JSON.stringify({ decisions }) }); toast(t("fl.saved")); await loadFlyers(); } catch (e) { toast(e.message); } };
+  const rowDecision = (it, action, name, price) => ({ item_id: it.item_id, action, name: name.value, ...(price.value === "" ? {} : { price: Number(price.value) }) });
+  const pendingItems = [];
+  for (const it of f.items) {
+    const tr = el("tr", "", it.low_confidence && it.status === "PENDING" ? "draft-row" : ""), name = el("input"), price = el("input");
+    name.value = it.name; name.maxLength = 80; name.setAttribute("aria-label", t("fl.name"));
+    price.type = "number"; price.min = 1; price.value = it.price ?? ""; price.setAttribute("aria-label", t("fl.price"));
+    const conf = el("td", it.confidence === null ? "–" : Math.round(it.confidence * 100) + "%", "num");
+    if (it.low_confidence && it.status === "PENDING") conf.append(el("small", t("fl.low")));
+    const st = el("td"); st.append(el("span", t("fstate." + it.status), "status " + (it.status === "APPROVED" ? "green" : it.status === "REJECTED" ? "red" : "")));
+    const ok = el("button", t("fl.approve"), "primary"), no = el("button", t("fl.reject")), act = el("td");
+    ok.onclick = () => decide([rowDecision(it, "approve", name, price)]); no.onclick = () => decide([{ item_id: it.item_id, action: "reject" }]);
+    act.append(ok, no);
+    const nameTd = el("td"), priceTd = el("td"); nameTd.append(name); priceTd.append(price);
+    tr.append(nameTd, priceTd, conf, st, act); body.append(tr);
+    if (it.status === "PENDING") pendingItems.push([it, name, price]);
+  }
+  const all = el("button", t("fl.approve_all"), "primary");
+  all.onclick = () => decide(pendingItems.map(([it, n, p]) => rowDecision(it, "approve", n, p))); all.hidden = !pendingItems.length;
+  const main = el("div", "", "flyer-items"), wrap = el("div", "", "scroll"); wrap.append(table);
+  main.append(el("h2", f.source_name), el("p", f.week_start, "hint"), all, wrap);
+  const split = el("div", "", "flyer-split"); split.append(side, main);
+  page.replaceChildren(split);
+}
+
+// ---- insights: promotion results, sales response, long discounts, new products -----------------------------------------
+async function loadInsights() {
+  const d = await api("/insights");
+  const fill = (id, cols, rows, make) => { const body = $(id + " tbody"); body.replaceChildren(); if (!rows.length) emptyRow(body, cols, t("ins.empty")); rows.forEach((r) => body.append(make(r))); };
+  const tr = (...cells) => { const row = el("tr"); cells.forEach((c) => row.append(c instanceof Node ? c : el("td", c))); return row; };
+  const num = (v) => el("td", v, "num"), pctText = (v) => v === null || v === undefined ? "–" : (v > 0 ? "+" : "") + v + "%";
+  fill("#ins-promos", 7, d.promotions, (p) => { const st = el("td"); st.append(el("span", t("istate." + p.status), "status " + (p.status === "OK" ? "green" : p.status === "FAILED" ? "red" : "")));
+    return tr(p.name, p.category_l || t("promos.all"), el("td", p.start_date + " – " + p.end_date, "num"), num(p.status === "INSUFFICIENT_DATA" ? "–" : won(p.actual_units)), num(p.status === "INSUFFICIENT_DATA" ? "–" : won(p.baseline_units)), num(pctText(p.uplift_pct)), st); });
+  const resp = Object.entries(d.response);
+  fill("#ins-response", 6, resp, ([cat, r]) => r.status === "OK"
+    ? tr(cat, num(r.promotions_used), el("td", r.span[0] + " – " + r.span[1], "num"), num(r.elasticity.pessimistic), num(r.elasticity.base), num(r.elasticity.optimistic))
+    : tr(cat, num(r.promotions_used), el("td", t("ins.of", { n: r.promotions_used, need: r.needed }), "num"), num("–"), num("–"), num("–")));
+  fill("#ins-prolonged", 4, d.prolonged_discounts, (x) => tr(x.platform, x.title, num(x.days_discounted + " / " + x.days_observed), num(x.share_pct + "%")));
+  fill("#ins-new", 3, d.new_products, (x) => tr(x.platform, x.title, el("td", x.first_seen.slice(0, 10), "num")));
 }
 
 // ---- promotion calendar -------------------------------------------------------------------------------------------

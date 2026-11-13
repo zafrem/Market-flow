@@ -55,6 +55,12 @@ SQLITE_DDL = [
         promo_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, category_l TEXT NOT NULL DEFAULT '',
         channel_name TEXT NOT NULL DEFAULT '', start_date TEXT NOT NULL, end_date TEXT NOT NULL,
         discount_pct NUMERIC, note TEXT, created_by TEXT NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS flyers (
+        flyer_id INTEGER PRIMARY KEY AUTOINCREMENT, source_name TEXT NOT NULL, image_path TEXT NOT NULL, week_start TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'PENDING', created_at TEXT NOT NULL, reviewed_by TEXT, reviewed_at TEXT)""",
+    """CREATE TABLE IF NOT EXISTS flyer_items (
+        item_id INTEGER PRIMARY KEY AUTOINCREMENT, flyer_id INTEGER NOT NULL, name TEXT NOT NULL, price INTEGER, confidence NUMERIC,
+        category_l TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'PENDING')""",
     """CREATE TABLE IF NOT EXISTS product_channel_map (
         platform TEXT NOT NULL, channel_item_code TEXT NOT NULL,
         std_item_id INTEGER NOT NULL REFERENCES master_products (std_item_id),

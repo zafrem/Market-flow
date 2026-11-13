@@ -85,3 +85,12 @@ api_key = ""           # env: GARAK_API_KEY
 
 [crawlers]
 # inbox_dir = "data/inbox"     # one subfolder per file crawler: report, buyer, flyer, newproduct (shared by worker and API)
+
+[insights]             # P2 analyses (every key optional)
+# min_uplift_pct = 5.0          # a promotion lifting sales less than this is called failed
+# min_promo_days = 3            # days of sales data needed before judging a promotion
+# baseline_weeks = 4            # baseline = same weekday in the previous N weeks
+# prolonged_share_pct = 60.0    # share of observed days a competitor listing is discounted
+# prolonged_window_days = 90
+# new_window_days = 14          # a listing first seen within this window counts as new
+# min_promotions_for_scenarios = 3

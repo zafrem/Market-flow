@@ -15,11 +15,17 @@ from pydantic import BaseModel, Field
 from sqlalchemy.engine import Engine
 
 from .. import curation, matching
+from .. import flyers
+from ..crawlers.service import resolve_inbox
+from ..vision import image_mime
+from ..insights import elasticity_basis, load_insight_config, new_products, project_scenarios, prolonged_discounts, promotion_results
 from ..promotions import add_promotion, list_promotions, remove_promotion
 from ..quality import load_thresholds, quality_report
 from ..snapshot import snapshot as take_snapshot
 from ..db import init_sqlite, make_engine
 from ..decision import service
+from ..decision.calc import disposal_cost, net_margin
+from ..decision.config import load_decision_config
 from ..decision.service import Actor, WorkflowError
 from ..crawlers.adapters import InboxCrawler
 from ..crawlers.service import CrawlerService
@@ -72,6 +78,17 @@ class PromotionIn(BaseModel):
 
 def cat_ok(scope, category_l: str) -> bool:
     return scope is None or any(l == category_l for l, _ in scope)
+
+
+class FlyerDecision(BaseModel):
+    item_id: int
+    action: Literal["approve", "reject"]
+    name: str | None = Field(default=None, max_length=80)
+    price: int | None = None
+
+
+class FlyerReviewIn(BaseModel):
+    decisions: list[FlyerDecision] = Field(min_length=1, max_length=300)
 
 
 class WatchlistIn(BaseModel):
@@ -148,7 +165,7 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
     async def security_headers(request: Request, call_next):
         resp = await call_next(request)
         resp.headers.update({"X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY",
-                             "Content-Security-Policy": "default-src 'self'; frame-ancestors 'none'",
+                             "Content-Security-Policy": "default-src 'self'; img-src 'self' blob:; frame-ancestors 'none'",
                              "Referrer-Policy": "no-referrer", "Cache-Control": "no-store"})
         if settings.hsts or settings.tls_cert:
             resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
@@ -424,6 +441,73 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
             raise HTTPException(404, "promotion not found")
         remove_promotion(repo, Actor(user.email, user.role), now(), promo_id)
         return {"ok": True}
+
+    def _item_scope(user: CurrentUser) -> dict[int, bool]:
+        return {int(r["std_item_id"]): in_scope(user.scope, r["category_l"], r["category_m"])
+                for r in repo._rows("SELECT std_item_id, category_l, category_m FROM master_products")}
+
+    @app.get("/insights")
+    def insights(user: CurrentUser = Depends(require_decider)):
+        """Failed promotions, prolonged competitor discounts, new competitor products, and the sales-response basis per category."""
+        cfg, today = load_insight_config(settings.insights), now().date()
+        ok = _item_scope(user)
+        promos = [p for p in promotion_results(repo, today, cfg) if p["category_l"] == "" and user.scope is None or p["category_l"] != "" and cat_ok(user.scope, p["category_l"])]
+        cats = sorted({r["category_l"] for r in repo._rows("SELECT DISTINCT category_l FROM master_products") if cat_ok(user.scope, r["category_l"])})
+        return {"as_of": str(today), "promotions": promos,
+                "prolonged_discounts": [x for x in prolonged_discounts(repo, today, cfg) if ok.get(x["std_item_id"])],
+                "new_products": [x for x in new_products(repo, today, cfg) if ok.get(x["std_item_id"])],
+                "response": {c: elasticity_basis(promos, c, cfg) for c in cats}}
+
+    @app.get("/scenarios")
+    def scenarios(internal_sku: str, channel_name: str, price: int, user: CurrentUser = Depends(require_decider)):
+        """Expected weekly units and margin if the price moves to `price`, under pessimistic / base / optimistic sales response."""
+        row = repo.inventory_latest(internal_sku, channel_name)
+        if row is None or not in_scope(user.scope, row["category_l"], row["category_m"]):
+            raise HTTPException(404, "SKU not found")
+        if price <= 0:
+            raise HTTPException(422, "price must be positive")
+        cfg, today = load_insight_config(settings.insights), now().date()
+        dc = load_decision_config(settings.decision, row["category_l"])
+        d = disposal_cost(row["purchase_cost"], row.get("disposal_cost"), dc.disposal_rate_pct)
+        args = (row["purchase_cost"], row["fixed_cost"], row["logistics_cost"], row["promo_cost"], row["channel_fee_rate"], bool(row["vat_inclusive"]), dc.vat_rate)
+        m_now, _ = net_margin(int(row["current_selling_price"]), *args, disposal=d)
+        m_new, _ = net_margin(price, *args, disposal=d)
+        basis = elasticity_basis(promotion_results(repo, today, cfg), row["category_l"], cfg)
+        return project_scenarios(basis, float(row["daily_sales_qty"]) * 7, float(row["current_selling_price"]), float(price), float(m_now), float(m_new))
+
+    # ---- flyers read from images: review before anything reaches the analysis (MD / ADMIN) ------------------------
+    @app.get("/flyers")
+    def flyers_list(user: CurrentUser = Depends(require_decider)):
+        return {"flyers": flyers.list_flyers(mi_store)}
+
+    @app.get("/flyers/{flyer_id}")
+    def flyer_one(flyer_id: int, user: CurrentUser = Depends(require_decider)):
+        f = flyers.get_flyer(mi_store, flyer_id)
+        if f is None:
+            raise HTTPException(404, "flyer not found")
+        return f
+
+    @app.get("/flyers/{flyer_id}/image")
+    def flyer_image(flyer_id: int, user: CurrentUser = Depends(require_decider)):
+        rel = flyers.image_path(mi_store, flyer_id)
+        root = resolve_inbox(settings.inbox_dir).resolve()
+        path = (root / rel).resolve() if rel else None
+        if path is None or root not in path.parents or not path.is_file() or path.is_symlink():
+            raise HTTPException(404, "image not found")
+        data = path.read_bytes()
+        mime = image_mime(data)
+        if mime is None:
+            raise HTTPException(404, "image not found")
+        return Response(content=data, media_type=mime)
+
+    @app.post("/flyers/{flyer_id}/review")
+    def flyer_review(flyer_id: int, body: FlyerReviewIn, user: CurrentUser = Depends(require_decider)):
+        try:
+            return flyers.review_flyer(mi_store, user.email, now(), flyer_id, [d.model_dump(exclude_unset=True) for d in body.decisions])
+        except KeyError:
+            raise HTTPException(404, "flyer not found")
+        except ValueError as e:
+            raise HTTPException(422, str(e))
 
     @app.get("/quality")
     def data_quality(_: CurrentUser = Depends(require_decider)):

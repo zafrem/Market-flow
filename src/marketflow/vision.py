@@ -25,7 +25,7 @@ Post = Callable[[str, dict[str, Any], dict[str, str]], Awaitable[tuple[int, Any]
 
 PROMPT = ("This is a retail promotion flyer or banner. List every product that is advertised with a name and, if shown, its sale "
           "price in Korean won (integer). Use only what is printed in the image; never guess a price. Skip store addresses, "
-          "phone numbers and anything about people. Return JSON: {\"items\": [{\"name\": str, \"price\": int or null}]}.")
+          "phone numbers and anything about people. Return JSON: {\"items\": [{\"name\": str, \"price\": int or null, \"confidence\": number 0 to 1 for how sure you are of this entry}]}.")
 
 
 class VisionError(RuntimeError):
@@ -36,6 +36,8 @@ class VisionError(RuntimeError):
 class FlyerItem:
     name: str
     price: int | None
+    confidence: float | None = None
+    confidence: float | None = None
 
 
 def image_mime(data: bytes) -> str | None:
@@ -71,7 +73,9 @@ def parse_items(payload: Any) -> list[FlyerItem]:
             continue
         price = it.get("price")
         price = price if isinstance(price, int) and not isinstance(price, bool) and 0 < price < 10_000_000 else None
-        out.append(FlyerItem(name, price))
+        conf = it.get("confidence")
+        conf = round(min(1.0, max(0.0, float(conf))), 3) if isinstance(conf, (int, float)) and not isinstance(conf, bool) else None
+        out.append(FlyerItem(name, price, conf))
     return out
 
 

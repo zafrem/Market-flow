@@ -43,7 +43,7 @@ Three deployable pieces share one database. There is no message broker and no ca
 | `scheduler.py`, `schedule.py` | KST slot arithmetic (`latest_slot`) and the `decide` job. |
 | `notify.py` | Alert construction, dedupe, retry, dead letter. |
 | `web/` | `app.py` (routes), `repo.py` (read models), `security.py` (hashing, JWT, throttle), `static/` (dashboard: `index.html`, `app.js`, `i18n.js`, `style.css`). |
-| `matching.py`, `promotions.py`, `quality.py`, `snapshot.py`, `vision.py` | Match grading (audited), promotion calendar, daily data-quality report and alerts, point-in-time snapshots (occurred vs. ingested time), flyer reading through the OpenAI API. |
+| `matching.py`, `promotions.py`, `quality.py`, `snapshot.py`, `vision.py`, `flyers.py`, `insights.py` | Match grading (audited), promotion calendar, daily data-quality report and alerts, point-in-time snapshots (occurred vs. ingested time), flyer reading through the OpenAI API, flyer review (items wait for a person before analysis), P2 analyses (promotion results, long discounts, new products, sales-response scenarios). |
 | `mi/` (more) | `privacy.py` (personal-data filter on import), `classify.py` (category classifier), `gap.py` (search–sales gap diagnosis), synonym dictionary in `store.py`. |
 | `time_provider.py` | Injectable clock; all business logic takes a `TimeProvider`, so tests run on a fixed time. |
 
@@ -61,6 +61,7 @@ Defined in `db/init/001_schema.sql`.
 | Access | `users`, `user_category_assignments`, `user_watchlists`, `user_preferences` | |
 | Market intelligence | `mi_observations` | Long format: `signal_type`, `period_start`, `category_l`, `keyword`, `metric`, `value`, `source`; unique on that key. |
 | Keywords and calendar | `mi_synonyms`, `promotions` | Synonym dictionary with history; promotion calendar (informational). |
+| Flyers | `flyers`, `flyer_items` | Items read from images; only APPROVED items become PROMOTION observations. |
 | Crawlers | `crawler_settings`, `crawler_runs` | Settings (enabled, KST times, JSON config, `last_slot`); run history with status and `rows_loaded`. |
 
 ## 4. Main flows

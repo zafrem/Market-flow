@@ -45,6 +45,7 @@ class Settings:
     inbox_dir: str = "data/inbox"   # file-drop folders for the report/buyer/flyer/new-product crawlers (one subfolder each)
     hsts: bool = False          # send Strict-Transport-Security (also implied by tls_cert); set when a proxy terminates TLS
     decision: Mapping[str, Any] = field(default_factory=dict)   # raw [decision] table
+    insights: Mapping[str, Any] = field(default_factory=dict)   # raw [insights] table (P2 analysis thresholds)
     quality: Mapping[str, Any] = field(default_factory=dict)    # raw [quality] table (data-quality thresholds)
     mi: Mapping[str, Any] = field(default_factory=dict)         # raw [mi] table (Market Intelligence tunables)
 
@@ -120,5 +121,6 @@ def load_settings(path: Path | str | None = None, env: Mapping[str, str] | None 
         hsts=_truthy(pick("HSTS", "server", "hsts", default=False)),
         decision=dict(data.get("decision", {})),
         quality=dict(data.get("quality", {})),
+        insights=dict(data.get("insights", {})),
         mi=dict(data.get("mi", {})),
     )

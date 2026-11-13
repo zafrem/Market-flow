@@ -89,12 +89,12 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"      # put the outp
 - **If we match**: the matrix and every recommendation show the expected margin at the competitor's effective price and the weekly break-even volume (`weekly units x margin now / margin then`; "no margin at that price" when the cut leaves nothing).
 - **Export**: dashboard > Comparison matrix > Export comparison (CSV), or `GET /matrix/export` (MD/ADMIN, audited as `MATRIX_EXPORTED`).
 - **Alerts carry no cost, margin or price figures**, only the SKU, the situation and a link (`[server] public_url`). One alert per SKU and type per 24 h.
-- Upgrading an existing MySQL: apply `db/migrations/002` to `005` in order (price/margin columns, keyword tables, inventory revisions, promotions). SQLite adds missing tables and columns by itself.
+- Upgrading an existing MySQL: apply `db/migrations/002` to `006` in order (price/margin columns, keyword tables, inventory revisions, promotions, flyer review). SQLite adds missing tables and columns by itself.
 
 ## Vision (ChatGPT / OpenAI API)
 Competitor flyers and banners are read with the OpenAI API. Put the key in `config/settings.toml` under `[vision] openai_api_key` (file mode 600, git-ignored) or in the environment as `OPENAI_API_KEY` (optionally `OPENAI_MODEL`, default `gpt-4o-mini`; use any vision-capable model on your account). In Docker, set `OPENAI_API_KEY` in `.env`. `python -m marketflow.worker --check` prints `vision_enabled=True/False` and never prints the key.
 
-How it works: drop PNG/JPEG/WebP files (max 5 MB each) in `data/inbox/flyer/`. On the flyer crawler's schedule (or **Run now**), each image is sent to OpenAI, which returns the advertised product names and prices. Every product becomes one PROMOTION mention for the week (category from the keyword classifier when it knows one). Read images move to `processed/`, unreadable ones to `failed/`; at most `max_images` (default 10) are read per run. CSV/XLSX flyer files still work as before.
+How it works: drop PNG/JPEG/WebP files (max 5 MB each) in `data/inbox/flyer/` (banners and exhibition pages are images too). On the flyer crawler's schedule (or **Run now**), each image is sent to OpenAI, which returns the advertised product names, prices and its own confidence. **Nothing reaches the analysis yet**: the items wait on the **Flyers** tab, which shows the image beside the items (unsure ones flagged). A reviewer fixes a name or price and approves or rejects each item; approved items become one PROMOTION mention per product for the week (category from the keyword classifier when it knows one), and a later change is recomputed. Images are kept in `inbox/flyer/review/`, unreadable ones go to `failed/`; at most `max_images` (default 10) per run. CSV/XLSX flyer files still import directly as before.
 
 What leaves your machine: the image, and only while the flyer crawler is enabled and a key is set. Without a key the images stay in the inbox. The type is checked from the file bytes, rows with personal data (phone, e-mail, address) are dropped, and the key and the API's response bodies are never logged. This path is covered by offline tests with a fake API; it has not been run against the live OpenAI API.
 
@@ -167,3 +167,11 @@ cd tests/js && npm install && npm test      # real app.js + index.html in jsdom 
 - **Daily digest** (`[alerts] digest = true`, opt-in): alerts below RED are sent as one summary per run; RED alerts stay individual.
 - **Data-quality strip** above the comparison matrix: one chip per crawler (fresh, stale, low success) plus counts that need a person.
 - The dashboard has a dark navigation rail and a summary band; numbers use a monospaced face so columns line up.
+
+## P2 analyses (Insights tab)
+Computed from data the system already holds; every finding shows its figures, and with too little data you get "not enough data" instead of a number. Thresholds are in `[insights]`.
+- **Promotion results**: units sold during a promotion against the average of the same weekday in the previous 4 weeks (days of any promotion excluded; no seasonal adjustment, and the screen says so). Below `min_uplift_pct` it is called failed.
+- **Competitors on long discounts**: listings discounted on at least 60% of the observed days in 90 days (at least 14 days observed).
+- **New competitor products**: listings first seen within 14 days on a platform watched for longer. Renamed products (same letters in the title) and replacements of a vanished code for the same catalog item are not counted as new.
+- **Sales response**: elasticity from the category's own measured promotions with a discount (lower quartile, median, upper quartile = pessimistic, base, optimistic), shown only with at least 3 promotions and with their number and span. `GET /scenarios?internal_sku=&channel_name=&price=` projects weekly units and margin at a new price (MD/ADMIN). CLI: `cli insights`.
+- Upgrading an existing MySQL: also apply `db/migrations/006_p2_flyers.sql`.

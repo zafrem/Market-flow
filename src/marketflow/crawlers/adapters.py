@@ -83,9 +83,9 @@ IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 
 
 class FlyerCrawler(InboxCrawler):
-    """Flyers: CSV/XLSX counts as before, plus images read with the OpenAI API. Each advertised product becomes one PROMOTION
-    mention for the week (category from the keyword classifier when it knows one). Images are sent to OpenAI only while this
-    crawler is enabled and a key is set; without a key they stay in the inbox untouched."""
+    """Flyers: CSV/XLSX counts as before, plus images read with the OpenAI API. What the reader finds waits on the Flyers tab
+    (image beside the items, with the reader's confidence); only items a person approves become PROMOTION mentions. Images
+    are sent to OpenAI only while this crawler is enabled and a key is set; without a key they stay in the inbox untouched."""
     fields = (Field("max_images", "int", 10, 50),)
 
     def __init__(self, inbox_root: Path, store: MiStore, tp: TimeProvider, vision: OpenAIVision | None):
@@ -105,31 +105,31 @@ class FlyerCrawler(InboxCrawler):
         if self._vision is None:
             return RunOutcome(base.stored, (base.message + "; " if base.stored or base.failed else "") +
                               f"{len(images)} image(s) waiting: set an OpenAI key (vision.openai_api_key) to read them.", failed=base.failed)
-        from ..mi.classify import Classifier
-        classifier = Classifier(*self._store.classifier_knowledge())
-        week, stamp = _week_monday(self._tp.now().date()), self._tp.now().strftime("%Y%m%d-%H%M%S")
-        counts: dict[tuple[str, str], int] = defaultdict(int)
-        done = failed = 0
+        from ..flyers import add_flyer
+        now = self._tp.now().replace(tzinfo=None)
+        week, stamp = _week_monday(now.date()), now.strftime("%Y%m%d-%H%M%S")
+        kept = self.dir / "review"
+        kept.mkdir(parents=True, exist_ok=True)
+        done = failed = found = 0
         notes: list[str] = []
         for f in images[: int(cfg.get("max_images", 10))]:
-            dest = "processed"
             try:
                 if f.stat().st_size > MAX_IMAGE_BYTES:
                     raise VisionError("image larger than 5 MB")
-                for item in await self._vision.read_flyer(f.read_bytes()):
-                    counts[(classifier.category_for(item.name) or "", item.name)] += 1
-                done += 1
-            except Exception as e:                                     # park the file; do not resend a bad image every run
-                dest, failed = "failed", failed + 1
+                items = await self._vision.read_flyer(f.read_bytes())
+                dest = kept / f"{stamp}-{f.name}"
+                shutil.move(str(f), dest)                                  # kept: the reviewer needs the image beside the items
+                add_flyer(self._store, f.name, str(dest.relative_to(self.dir.parent)), week, items, now)
+                done, found = done + 1, found + len(items)
+            except Exception as e:                                         # park the file; do not resend a bad image every run
+                failed += 1
                 notes.append(f"{f.name}: {e}")
-            shutil.move(str(f), self.dir / dest / f"{stamp}-{f.name}")
-        rows = [{"signal_type": "PROMOTION", "period_start": week, "category_l": c, "keyword": k, "metric": "count", "value": n, "source": "flyer:image"}
-                for (c, k), n in counts.items()]
-        self._store.upsert_observations(rows, keep_max=True)
+                if f.exists():
+                    shutil.move(str(f), self.dir / "failed" / f"{stamp}-{f.name}")
         left = len(images) - done - failed
-        msg = (base.message + "; " if base.stored or base.failed else "") + f"{done} image(s) read, {len(rows)} product(s) found" + \
+        msg = (base.message + "; " if base.stored or base.failed else "") + f"{done} image(s) read, {found} product(s) waiting for review (Flyers tab)" + \
               (f", {left} left for the next run" if left else "") + ("; failed: " + "; ".join(notes) if notes else "")
-        return RunOutcome(base.stored + len(rows), msg, failed=base.failed or failed > 0)
+        return RunOutcome(base.stored, msg, failed=base.failed or failed > 0)
 
 
 def _week_monday(d: date) -> date:

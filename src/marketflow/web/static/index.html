@@ -25,7 +25,7 @@
     </section>
     <section id="app" hidden>
       <div id="summary" class="summary" data-i18n-label="summary" aria-label="Summary"></div>
-      <nav><button data-tab="matrix" class="active"><span data-i18n="tab.matrix">Comparison matrix</span></button><button data-tab="health"><span data-i18n="tab.health">Category health</span></button><button data-tab="radar"><span data-i18n="tab.radar">Trend radar</span></button><button data-tab="gap"><span data-i18n="tab.gap">Search gap</span></button><button data-tab="recs"><span data-i18n="tab.recs">Recommendations</span></button><button data-tab="crawlers" class="decider"><span data-i18n="tab.crawlers">Crawlers</span></button><button data-tab="matches" class="decider"><span data-i18n="tab.matches">Product matches</span></button><button data-tab="promos" class="decider"><span data-i18n="tab.promos">Promotions</span></button><button data-tab="review" class="decider"><span data-i18n="tab.review">Review queue</span></button><button data-tab="selectors" class="decider"><span data-i18n="tab.selectors">Selector candidates</span></button></nav>
+      <nav><button data-tab="matrix" class="active"><span data-i18n="tab.matrix">Comparison matrix</span></button><button data-tab="health"><span data-i18n="tab.health">Category health</span></button><button data-tab="radar"><span data-i18n="tab.radar">Trend radar</span></button><button data-tab="gap"><span data-i18n="tab.gap">Search gap</span></button><button data-tab="recs"><span data-i18n="tab.recs">Recommendations</span></button><button data-tab="crawlers" class="decider"><span data-i18n="tab.crawlers">Crawlers</span></button><button data-tab="matches" class="decider"><span data-i18n="tab.matches">Product matches</span></button><button data-tab="flyers" class="decider"><span data-i18n="tab.flyers">Flyers</span></button><button data-tab="insights" class="decider"><span data-i18n="tab.insights">Insights</span></button><button data-tab="promos" class="decider"><span data-i18n="tab.promos">Promotions</span></button><button data-tab="review" class="decider"><span data-i18n="tab.review">Review queue</span></button><button data-tab="selectors" class="decider"><span data-i18n="tab.selectors">Selector candidates</span></button></nav>
       <p id="toast" role="status"></p>
       <ul id="qstrip" class="qstrip decider" hidden></ul>
       <div id="matrix">
@@ -74,6 +74,22 @@
       <div id="matches" hidden>
         <p class="hint" data-i18n="matches.hint">Only listings you confirm as the same product drive prices and alerts. Similar and substitute products are recorded but never used.</p>
         <div class="scroll"><table id="matches-table"><thead><tr><th data-i18n="th.platform">Platform</th><th data-i18n="th.code">Listing</th><th data-i18n="th.title">Title</th><th data-i18n="th.item">Item</th><th data-i18n="th.grade">Grade</th><th data-i18n="th.status">Status</th><th></th></tr></thead><tbody></tbody></table></div>
+      </div>
+      <div id="flyers" hidden>
+        <p class="hint" data-i18n="fl.hint">Images read from flyers wait here. Compare each item with the image, fix a name or price, then approve or reject. Only approved items reach the analysis.</p>
+        <div class="crawl-layout"><ul id="flyer-list" class="crawl-list"></ul>
+          <section id="flyer-page" class="crawl-page"><p class="empty" data-i18n="fl.pick">Pick a flyer on the left.</p></section></div>
+      </div>
+      <div id="insights" hidden>
+        <p class="hint" data-i18n="ins.hint">Findings from your own sales, the promotion calendar and scraped competitor prices. Each one shows the figures behind it; with too little data you get "not enough data", not a number.</p>
+        <h2 class="sect" data-i18n="ins.promos">Promotion results</h2>
+        <div class="scroll"><table id="ins-promos"><thead><tr><th data-i18n="promos.name">Name</th><th data-i18n="th.category">Category</th><th data-i18n="promos.when">Period</th><th class="r" data-i18n="ins.actual">Units sold</th><th class="r" data-i18n="ins.baseline">Baseline</th><th class="r" data-i18n="ins.uplift">Uplift</th><th data-i18n="th.status">Status</th></tr></thead><tbody></tbody></table></div>
+        <h2 class="sect" data-i18n="ins.response">Sales response to a price cut</h2>
+        <div class="scroll"><table id="ins-response"><thead><tr><th data-i18n="th.category">Category</th><th class="r" data-i18n="ins.used">Promotions used</th><th data-i18n="ins.span">Span</th><th class="r" data-i18n="ins.pess">Pessimistic</th><th class="r" data-i18n="ins.base">Base</th><th class="r" data-i18n="ins.opt">Optimistic</th></tr></thead><tbody></tbody></table></div>
+        <h2 class="sect" data-i18n="ins.prolonged">Competitors on long discounts</h2>
+        <div class="scroll"><table id="ins-prolonged"><thead><tr><th data-i18n="th.platform">Platform</th><th data-i18n="th.title">Title</th><th class="r" data-i18n="ins.days">Days discounted</th><th class="r" data-i18n="ins.share">Share</th></tr></thead><tbody></tbody></table></div>
+        <h2 class="sect" data-i18n="ins.new">New competitor products</h2>
+        <div class="scroll"><table id="ins-new"><thead><tr><th data-i18n="th.platform">Platform</th><th data-i18n="th.title">Title</th><th data-i18n="ins.first">First seen</th></tr></thead><tbody></tbody></table></div>
       </div>
       <div id="promos" hidden>
         <p class="hint" data-i18n="promos.hint">Campaigns we or a channel ran. Read a jump in searches or sales against them. They do not change prices.</p>

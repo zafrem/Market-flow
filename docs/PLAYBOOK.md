@@ -52,6 +52,9 @@ On a matrix row press **Propose price**: enter a price and a reason. The proposa
 ### 3.2b Promotions
 Dashboard > Promotions: record campaigns (name, period, category, channel, discount) so a jump in searches or sales is read against them. They do not change prices. Recording one for every category is admin-only.
 
+### 3.2c Flyers and insights
+Flyer images dropped in `data/inbox/flyer/` are read on the flyer crawler's run. Dashboard > Flyers (tab badge = flyers waiting): compare the image with the items, fix names and prices, approve or reject. Only approved items reach the analysis. Dashboard > Insights (or `cli insights`) lists failed promotions, long competitor discounts, new competitor products and the sales response per category; read the basis shown beside each number before acting on it.
+
 ### 3.3 Market intelligence (weekly or monthly)
 1. Get the data: search report (Hive export) → `report` crawler; Power BI monthly export → `buyer`; flyer images (PNG/JPEG/WebP; each image is sent to OpenAI, needs a key) or a CSV → `flyer`; new-product list → `newproduct`.
 2. Drop the CSV/XLSX in `data/inbox/<crawler>/` or upload on that crawler's page. One row per period (and optionally category and keyword); other numeric columns become metrics. Accepted periods: `2026-10-26`, `20261026`, `202610`, `2026-W43`. Re-importing a period overwrites it.
@@ -87,7 +90,7 @@ Set `[alerts] webhook_url` to a Slack-compatible webhook. Test: `cli alert-test`
 
 1. Take a backup first (§7).
 2. `git pull`; run `.venv/bin/pytest` (and `cd tests/js && npm test` if the dashboard changed).
-3. Docker: `docker compose up --build -d`. Schema files in `db/init/*.sql` run only on an **empty** data directory. For an existing MySQL apply the files in `db/migrations/` in order (`002` price/margin columns, `003` keyword tables, `004` inventory revision history, `005` promotions); new tables can be created from the `CREATE TABLE IF NOT EXISTS` statements in `db/init/001_schema.sql`. SQLite adds missing tables and columns on start.
+3. Docker: `docker compose up --build -d`. Schema files in `db/init/*.sql` run only on an **empty** data directory. For an existing MySQL apply the files in `db/migrations/` in order (`002` price/margin columns, `003` keyword tables, `004` inventory revision history, `005` promotions, `006` flyer review); new tables can be created from the `CREATE TABLE IF NOT EXISTS` statements in `db/init/001_schema.sql`. SQLite adds missing tables and columns on start.
 4. Check `docker compose logs collector-worker backend-api` for errors, then the Crawlers tab for the next slot.
 5. Rollback: previous image/commit, restore the backup if the schema changed.
 
