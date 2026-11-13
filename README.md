@@ -11,6 +11,8 @@
 
 ## 로컬 실행 (Docker 없이, DuckDB)
 
+**빠른 시작:** `scripts/start.sh` (워커도 함께: `scripts/start.sh --worker`, 다른 포트: `PORT=8765 scripts/start.sh`). 처음 실행하면 가상환경과 의존성, `config/settings.toml`, 로그인 비밀키(`data/.jwt_secret`)를 만들고 첫 ADMIN 계정을 물어본 뒤 http://127.0.0.1:8000 에서 대시보드를 시작합니다. 아래는 같은 일을 손으로 하는 방법입니다.
+
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 cp config/settings.example.toml config/settings.toml && chmod 600 config/settings.toml
