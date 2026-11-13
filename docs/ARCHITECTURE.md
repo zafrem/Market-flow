@@ -38,6 +38,7 @@
 | `title_parser.py`, `units.py`, `curation.py` | 상품 제목 파싱, 단위 가격 정규화, 채널 상품을 `master_products`에 매핑. |
 | `discover.py` | 발굴 화면: 경쟁사 신상품, 검색량 상위·급상승 키워드, 카탈로그 보유 여부(`GET /discover`). 원가를 쓰지 않아 모든 역할이 자기 카테고리 안에서 봅니다. |
 | `demo.py` | 데모 데이터 생성(고정 시드)과 데이터 비우기. 빈 저장소에만 넣고, 비우기는 사용자·카탈로그·감사 기록을 남깁니다. 로컬 파일 DB 전용. |
+| `transfer.py` | 전체 데이터 내보내기/가져오기(zip: 표별 JSON Lines + 전단 이미지 + manifest). 계정·감사 기록·토큰은 제외, 가져오기는 빈 로컬 DB에만, 한 트랜잭션. |
 | `migrate.py` | 기존 SQLite 파일을 새 DuckDB 파일로 복사(`cli migrate-sqlite`). |
 | `hive_source.py` | Hive 직접 조회(읽기 전용 SELECT만, 비밀번호는 오류·로그에 안 나옴). 결과는 `internal_data.import_table`로 같은 검증을 거칩니다. |
 | `internal_data.py` | 재고/원가 가져오기(CSV/XLSX, 영어/한국어 헤더, 오류는 줄 번호로 보고). |

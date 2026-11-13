@@ -143,6 +143,11 @@
         <p class="hint" id="data-hint"></p>
         <div id="data-status"></div>
         <p class="actions"><button id="demo-load" type="button" data-i18n="set.demo">Load demo data</button> <button id="data-clear" type="button" class="danger" data-i18n="set.clear">Clear data…</button></p>
+        <h2 data-i18n="set.transfer">Export and import</h2>
+        <p class="hint" data-i18n="set.transfer.hint">Export everything (prices, inventory and cost history, matches, recommendations, promotions, demand signals, queues, flyers with their images) as one zip. Import loads such a file into an empty database. User accounts, passwords, the audit trail and tokens are never included.</p>
+        <p class="actions"><button id="data-export" type="button" data-i18n="set.export">Export all data (zip)</button>
+          <input id="import-file" type="file" accept=".zip,application/zip" hidden>
+          <button id="data-import" type="button" data-i18n="set.import">Import from a zip…</button></p>
         <form id="clear-form" class="clear-form" hidden>
           <p data-i18n="set.clear.warn">This deletes prices, inventory and cost history, competitor prices, matches, recommendations, promotions, demand signals, queues and run history. It keeps users, the catalog, crawler settings, synonyms and the audit trail. It cannot be undone.</p>
           <label><span data-i18n="set.clear.type">Type DELETE to confirm</span><input name="confirm" type="text" autocomplete="off" required></label>

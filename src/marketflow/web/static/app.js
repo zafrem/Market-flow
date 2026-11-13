@@ -338,7 +338,9 @@ async function loadSystem() {
     for (const k of COUNT_KEYS) { const c = el("span", t("cnt." + k), "chip"); c.append(el("b", String(s.counts[k]))); box.append(c); }
     if (!hasData) box.append(el("span", t("cnt.empty"), "chip"));
     $("#demo-load").disabled = !s.local || hasData; $("#demo-load").title = hasData ? t("set.demo.has_data") : "";
-  } else { box.append(el("span", t("set.demo.running"), "chip")); $("#demo-load").disabled = true; }
+    $("#data-import").disabled = !s.local || hasData; $("#data-import").title = hasData ? t("set.import.has_data") : "";
+  } else { box.append(el("span", t("set.demo.running"), "chip")); $("#demo-load").disabled = true; $("#data-import").disabled = true; }
+  $("#data-export").disabled = running;
   $("#data-clear").disabled = !s.local || running;
   clearTimeout(demoPoll);
   if (running) { demoWatching = true; demoPoll = setTimeout(() => loadSystem().catch(() => {}), 3000); return; }
@@ -349,6 +351,27 @@ async function loadSystem() {
 }
 $("#demo-load").addEventListener("click", async () => {
   try { await api("/admin/demo", { method: "POST" }); toast(""); await loadSystem(); } catch (e) { toast(e.message); }
+});
+$("#data-export").addEventListener("click", async () => {
+  try {
+    const r = await fetch("/admin/export", { headers: { Authorization: "Bearer " + token } });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+    const url = URL.createObjectURL(await r.blob()), name = /filename="([^"]+)"/.exec(r.headers.get("Content-Disposition") || "")?.[1] || "marketflow-export.zip";
+    const a = el("a"); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    toast(t("set.exported"));
+  } catch (e) { toast(e.message); }
+});
+$("#data-import").addEventListener("click", () => $("#import-file").click());
+$("#import-file").addEventListener("change", async (ev) => {
+  const file = ev.target.files[0]; ev.target.value = "";
+  if (!file || !window.confirm(t("set.import.confirm", { name: file.name }))) return;
+  try {
+    const r = await fetch("/admin/import", { method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/zip" }, body: file });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.detail || r.statusText);
+    const rows = Object.entries(body.loaded).filter(([k]) => k !== "images").reduce((n, [, v]) => n + v, 0);
+    toast(t("set.imported", { rows, images: body.loaded.images })); await reloadAll();
+  } catch (e) { toast(e.message); }
 });
 $("#data-clear").addEventListener("click", () => { $("#clear-form").hidden = false; $("#clear-form").elements.confirm.focus(); });
 $("#clear-cancel").addEventListener("click", () => { $("#clear-form").hidden = true; $("#clear-form").reset(); });

@@ -10,13 +10,14 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, Response
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy.engine import Engine
 
 from .. import curation, matching
-from .. import demo, flyers
+from .. import demo, flyers, transfer
 from .. import discover as discover_mod
 from ..crawlers.service import resolve_inbox
 from ..vision import image_mime
@@ -700,6 +701,58 @@ def create_app(settings: Settings, engine: Engine | None = None, tp: TimeProvide
             demo_job.update(state="idle", message="", result=None)
         repo.audit(admin.email, "DATA_CLEARED", None, {k: v for k, v in removed.items() if v}, now())
         return {"removed": removed}
+
+    @app.get("/admin/export")
+    def export_data(admin: CurrentUser = Depends(require_admin)):
+        """Every analysis table and the flyer images as one zip. Accounts, the audit trail, crawler settings and tokens are left out."""
+        with demo_lock:
+            if demo_job["state"] == "RUNNING":
+                raise HTTPException(409, "demo data is loading; wait until it finishes")
+        out = transfer.spooled()
+        manifest = transfer.export_all(engine, settings.inbox_dir, out)
+        repo.audit(admin.email, "DATA_EXPORTED", None, {"tables": sum(manifest["tables"].values()), "images": len(manifest["images"])}, now())
+        out.seek(0)
+
+        def stream():
+            try:
+                while chunk := out.read(1024 * 1024):
+                    yield chunk
+            finally:
+                out.close()
+        return StreamingResponse(stream(), media_type="application/zip",
+                                 headers={"Content-Disposition": f'attachment; filename="marketflow-export-{now():%Y%m%d-%H%M}.zip"'})
+
+    @app.post("/admin/import")
+    async def import_data(request: Request, admin: CurrentUser = Depends(require_admin)):
+        """Loads an export made by /admin/export. Only into a database without data, so nothing is mixed or overwritten."""
+        if not local_store:
+            raise HTTPException(409, "import is only available for a local file database (DuckDB or SQLite)")
+        if (declared := request.headers.get("content-length")) and declared.isdigit() and int(declared) > transfer.MAX_UPLOAD:
+            raise HTTPException(413, "file too large")
+        body, size = transfer.spooled(), 0
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > transfer.MAX_UPLOAD:
+                raise HTTPException(413, "file too large")
+            body.write(chunk)
+        body.seek(0)
+
+        def work():
+            with demo_lock:
+                if demo_job["state"] == "RUNNING":
+                    raise HTTPException(409, "demo data is loading; wait until it finishes")
+                if demo.has_operational_data(engine):
+                    raise HTTPException(409, "the database already holds data; clear it first so the two are not mixed")
+                try:
+                    return transfer.import_all(engine, settings.inbox_dir, body)
+                except transfer.TransferError as e:
+                    raise HTTPException(422, str(e))
+        try:
+            result = await run_in_threadpool(work)
+        finally:
+            body.close()
+        repo.audit(admin.email, "DATA_IMPORTED", None, {k: v for k, v in result.items() if v}, now())
+        return {"loaded": result}
 
     @app.get("/admin/audit")
     def audit(_: CurrentUser = Depends(require_admin)):

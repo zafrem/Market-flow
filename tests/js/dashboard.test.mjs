@@ -693,6 +693,25 @@ test("settings: demo data only into an empty database; clearing needs DELETE typ
   assert.ok(f.hidden);
 });
 
+test("settings: export downloads with the token; import only into an empty database and sends the file as is", async () => {
+  let counts = SYSTEM().counts;
+  const t = boot({ role: "ADMIN", routes: { "GET /admin/users": () => [200, USERS], "GET /admin/system": () => [200, SYSTEM({ counts })],
+    "POST /admin/import": () => [200, { loaded: { ext_retail_prices: 5, promotions: 2, images: 3 } }] } });
+  await t.login();
+  assert.ok(!t.d.querySelector("#data-import").disabled && !t.d.querySelector("#data-export").disabled);       // empty: import is possible
+  t.w.confirm = () => true;
+  const input = t.d.querySelector("#import-file"), file = new t.w.File(["zip-bytes"], "all.zip", { type: "application/zip" });
+  Object.defineProperty(input, "files", { value: [file], configurable: true });
+  input.dispatchEvent(new t.w.Event("change", { bubbles: true })); await settle();
+  const call = t.calls.find((c) => c.path === "/admin/import");
+  assert.equal(call.method, "POST"); assert.equal(call.auth, "Bearer tok123"); assert.equal(call.body, file);
+  assert.match(text(t.d.querySelector("#toast")), /7.*3/);                                                     // 7 rows, 3 images
+  counts = { ...counts, ext_retail_prices: 40 };
+  await t.click(t.d.querySelector('nav button[data-tab="settings"]')); await t.w.eval("loadSystem()"); await settle();
+  assert.ok(t.d.querySelector("#data-import").disabled);                                                       // has data: clear first
+  assert.ok(!t.d.querySelector("#data-export").disabled);
+});
+
 // ---- discover is the first screen ------------------------------------------------------------------------------------------
 const KW = (over = {}) => ({ keyword: "그릭요거트", category: "Processed", searches: 1200, wow: 0.1, yoy: null, growth: 0.23, stage: "EMERGING", in_catalog: false, action: "Review the range", changed: "", series: [["2026-10-26", "900"], ["2026-11-02", "1200"]], ...over });
 const DISCOVER = { as_of: "2026-11-02", window_days: 14, summary: { new_products: 1, rising: 1, top_not_in_catalog: 1, gaps: 1 },
