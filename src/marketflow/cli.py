@@ -40,6 +40,7 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
     ap = argparse.ArgumentParser(prog="marketflow.cli")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("import-internal"); p.add_argument("file"); p.add_argument("--date")
+    p = sub.add_parser("migrate-sqlite"); p.add_argument("source"); p.add_argument("target")
     p = sub.add_parser("import-hive"); p.add_argument("--query", default="inventory"); p.add_argument("--date")
     sub.add_parser("decide")
     p = sub.add_parser("recs"); p.add_argument("--status")
@@ -70,6 +71,17 @@ def main(argv: list[str] | None = None, *, settings: Settings | None = None, tp:
     a = ap.parse_args(argv)
 
     settings, tp = settings or load_settings(), tp or SystemTimeProvider()
+    if a.cmd == "migrate-sqlite":
+        from .migrate import migrate_sqlite_to_duckdb
+        try:
+            copied = migrate_sqlite_to_duckdb(a.source, a.target)
+        except ValueError as e:
+            print(f"refused: {e}", file=out)
+            return 2
+        for name, n in copied.items():
+            print(f"  {name}: {n}", file=out)
+        print(f"copied {sum(copied.values())} rows into {a.target}", file=out)
+        return 0
     engine = make_engine(settings.database_url)
     if engine.dialect.name in ("sqlite", "duckdb"):
         init_sqlite(engine)

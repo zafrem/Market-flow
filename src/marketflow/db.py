@@ -211,7 +211,7 @@ def duckdb_ddl() -> list[str]:
     return out
 
 
-def init_sqlite(engine: Engine) -> None:
+def init_sqlite(engine: Engine, seed: bool = True) -> None:
     """Create tables and seed the starter catalog on the local store (DuckDB or SQLite). Idempotent."""
     duck = engine.dialect.name == "duckdb"
     with engine.begin() as c:
@@ -223,6 +223,8 @@ def init_sqlite(engine: Engine) -> None:
             have = {r[1] for r in c.execute(text(f"PRAGMA table_info({table})"))}
             if column not in have:
                 c.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {decl}"))
+        if not seed:
+            return
         for l, m, name, unit in ITEMS:
             c.execute(text("INSERT OR IGNORE INTO master_products (category_l, category_m, item_name, standard_unit) "
                            "VALUES (:l,:m,:n,:u)"), {"l": l, "m": m, "n": name, "u": unit})

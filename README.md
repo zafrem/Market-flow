@@ -46,6 +46,7 @@ MARKETFLOW_TEST_DB_URL=mysql+pymysql://... .venv/bin/pytest -m mysql   # MySQL D
 ## 로컬 저장소와 사내 데이터 유입
 
 - **로컬 저장소는 DuckDB 파일 하나**(`data/marketflow.duckdb`, `[database] url`)입니다. DuckDB 파일은 한 번에 한 프로세스만 열 수 있어서, 워커·웹·CLI는 트랜잭션이 도는 동안만 파일을 열고 다른 프로세스가 놓을 때까지 최대 15초 기다립니다(동시에 써도 유실되지 않음을 4개 프로세스로 확인). 운영(Docker)은 계속 MySQL 8이고, `sqlite:///...`도 그대로 동작합니다.
+- **기존 SQLite 데이터 옮기기**: `python -m marketflow.cli migrate-sqlite data/marketflow.db data/marketflow.duckdb`. 새 DuckDB 파일에 스키마를 만들고 모든 테이블을 id 그대로 복사합니다(감사 기록, 이력 포함). 대상 파일이 이미 있으면 덮어쓰지 않고 거부하며, 원본은 건드리지 않습니다.
 - **Excel(SharePoint)**: SharePoint에서 `.xlsx`/`.csv`를 내려받아 `import-internal 파일`로 넣습니다(자동 다운로드는 하지 않습니다). 열 이름은 `config/extraction.json`의 `internal.columns` 별칭(한글/영문)으로 맞춥니다.
 - **Hive**: `config/settings.toml`의 `[hive]`에 접속 정보와 이름 붙인 SELECT 쿼리를 적고 `pip install -e '.[hive]'` 후 `import-hive --query 이름`을 실행합니다. 비밀번호는 `HIVE_PASSWORD` 환경변수에 두며 로그·오류·`repr`에 나오지 않습니다. 단일 읽기 전용 SELECT만 허용하고(INSERT/DROP 등과 `;` 거부), 한 번에 최대 `max_rows`(기본 20만)행입니다. 쿼리 결과의 열 이름은 파일과 같은 별칭 규칙을 씁니다. 실제 Hive 서버에 대한 연결은 아직 검증하지 못했고, 가짜 연결로 테스트했습니다.
 
